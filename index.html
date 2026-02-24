@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>SVVR Scene Switch (Toggle Sky)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+
+  <script>
+    AFRAME.registerComponent("switch-sky", {
+      init: function () {
+        const el = this.el;
+        const sky1 = document.querySelector("#sky1");
+        const sky2 = document.querySelector("#sky2");
+
+        el.addEventListener("mouseenter", () => el.setAttribute("scale", "0.6 0.6 0.6"));
+        el.addEventListener("mouseleave", () => el.setAttribute("scale", "0.5 0.5 0.5"));
+
+        el.addEventListener("click", () => {
+          const v1 = sky1.getAttribute("visible");
+          sky1.setAttribute("visible", !v1);
+          sky2.setAttribute("visible", v1);
+          console.log("toggle sky:", !v1 ? "sky2" : "sky1");
+        });
+      }
+    });
+  </script>
+</head>
+
+<body style="margin:0;">
+  <a-scene>
+    <a-assets>
+      <img id="pano1" src="school.jpg">
+      <img id="pano2" src="school2.jpg">
+    </a-assets>
+
+    <!-- 兩個 sky 都先建好 -->
+    <a-sky id="sky1"
+      src="#pano1"
+      visible="true"
+      rotation="0 -90 0"
+      material="shader: flat; side: back;"
+    ></a-sky>
+
+    <a-sky id="sky2"
+      src="#pano2"
+      visible="false"
+      rotation="0 -90 0"
+      material="shader: flat; side: back;"
+    ></a-sky>
+
+    <!-- 熱點：凝視後切換 -->
+    <a-sphere
+      switch-sky
+      position="0 1.5 -3"
+      radius="0.3"
+      color="#FFD700"
+      scale="0.5 0.5 0.5"
+    ></a-sphere>
+
+    <a-entity position="0 1.6 0">
+      <a-camera>
+        <a-cursor fuse="true" fuse-timeout="1500"></a-cursor>
+      </a-camera>
+    </a-entity>
+  </a-scene>
+</body>
+</html>
