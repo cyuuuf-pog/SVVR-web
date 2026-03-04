@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>SVVR 360 Gallery (Final + Hotspots + 3s Gaze)</title>
+  <title>SVVR 三層架構骨架（Topic → Hub → Lesson）</title>
   <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
 
   <style>
-    /* 開頭輸入名字遮罩 */
+    /* ====== 名字輸入 Gate（HTML Overlay） ====== */
     #nameGate{
       position:fixed; inset:0;
       background:rgba(0,0,0,0.85);
@@ -17,7 +17,7 @@
       color:#fff;
     }
     #nameCard{
-      width:min(420px,100%);
+      width:min(460px,100%);
       background:rgba(20,20,20,0.92);
       border-radius:14px;
       padding:18px;
@@ -50,72 +50,297 @@
   </style>
 
   <script>
-    // ====== 基本設定 ======
-    const STORAGE_KEY = 'svvr_student_name_v1';
+    // =========================
+    // 0) 全域：狀態 / 設定
+    // =========================
+    const STORAGE_KEY_NAME  = 'svvr_student_name_v1';
+    const STORAGE_KEY_STATE = 'svvr_state_v1';
 
-    // 3 秒凝視觸發
-    const GAZE_TIMEOUT_MS = 3000;
+    const GAZE_TIMEOUT_MS = 2000; // 凝視點選 3 秒
 
-    // 依你的專案擴充場景：s1=主介面(Hub)、其餘=內容場景
-    const SCENES = {
-      s1: { panoAsset:'#pano1', hotspotGroup:'#hotspots-s1', label:'植物分類導覽', isHub:true  },
-      s2: { panoAsset:'#pano2', hotspotGroup:'#hotspots-s2', label:'草本植物區',   isHub:false },
-      s3: { panoAsset:'#pano3', hotspotGroup:'#hotspots-s3', label:'木本植物區',   isHub:false },
-      s4: { panoAsset:'#pano4', hotspotGroup:'#hotspots-s4', label:'灌木區',       isHub:false }
+    // 三層架構：TopicMenu → Hub(topic) → Lesson(topic, lesson)
+    const TOPICS = {
+      t1: {
+        name: "Topic 1｜植物分類 A",
+        hubPano: "#pano_t1_hub",
+        objectives: [
+          "了解 Topic 1 的學習目標（示範）",
+          "能辨識 3 種代表性特徵（示範）"
+        ],
+        lessons: [
+          { id: "t1_l1", name: "單元 1（scene3）", pano: "#pano_t1_l1", hotspotsGroup: "#hotspots-t1_l1", totalHotspots: 5 },
+          { id: "t1_l2", name: "單元 2（scene4）", pano: "#pano_t1_l2", hotspotsGroup: "#hotspots-t1_l2", totalHotspots: 5 },
+          { id: "t1_l3", name: "單元 3（scene5）", pano: "#pano_t1_l3", hotspotsGroup: "#hotspots-t1_l3", totalHotspots: 5 },
+        ],
+        quiz: {
+          questions: [
+            { q: "（Topic1）題目 1：示範？", options: ["A", "B", "C"], answer: 1, explain: "解析：正確答案是 B（示範）" },
+            { q: "（Topic1）題目 2：示範？", options: ["A", "B", "C"], answer: 0, explain: "解析：正確答案是 A（示範）" },
+            { q: "（Topic1）題目 3：示範？", options: ["A", "B", "C"], answer: 2, explain: "解析：正確答案是 C（示範）" },
+          ]
+        }
+      },
+      t2: {
+        name: "Topic 2｜植物分類 B",
+        hubPano: "#pano_t2_hub",
+        objectives: ["（示範）目標 1", "（示範）目標 2"],
+        lessons: [
+          { id: "t2_l1", name: "單元 1（scene3）", pano: "#pano_t2_l1", hotspotsGroup: "#hotspots-t2_l1", totalHotspots: 5 },
+          { id: "t2_l2", name: "單元 2（scene4）", pano: "#pano_t2_l2", hotspotsGroup: "#hotspots-t2_l2", totalHotspots: 5 },
+          { id: "t2_l3", name: "單元 3（scene5）", pano: "#pano_t2_l3", hotspotsGroup: "#hotspots-t2_l3", totalHotspots: 5 },
+        ],
+        quiz: {
+          questions: [
+            { q: "（Topic2）題目 1：示範？", options: ["A", "B", "C"], answer: 2, explain: "解析：正確答案是 C（示範）" },
+            { q: "（Topic2）題目 2：示範？", options: ["A", "B", "C"], answer: 1, explain: "解析：正確答案是 B（示範）" },
+            { q: "（Topic2）題目 3：示範？", options: ["A", "B", "C"], answer: 0, explain: "解析：正確答案是 A（示範）" },
+          ]
+        }
+      },
+      t3: {
+        name: "Topic 3｜植物分類 C",
+        hubPano: "#pano_t3_hub",
+        objectives: ["（示範）目標 1", "（示範）目標 2"],
+        lessons: [
+          { id: "t3_l1", name: "單元 1（scene3）", pano: "#pano_t3_l1", hotspotsGroup: "#hotspots-t3_l1", totalHotspots: 5 },
+          { id: "t3_l2", name: "單元 2（scene4）", pano: "#pano_t3_l2", hotspotsGroup: "#hotspots-t3_l2", totalHotspots: 5 },
+          { id: "t3_l3", name: "單元 3（scene5）", pano: "#pano_t3_l3", hotspotsGroup: "#hotspots-t3_l3", totalHotspots: 5 },
+        ],
+        quiz: {
+          questions: [
+            { q: "（Topic3）題目 1：示範？", options: ["A", "B", "C"], answer: 0, explain: "解析：正確答案是 A（示範）" },
+            { q: "（Topic3）題目 2：示範？", options: ["A", "B", "C"], answer: 2, explain: "解析：正確答案是 C（示範）" },
+            { q: "（Topic3）題目 3：示範？", options: ["A", "B", "C"], answer: 1, explain: "解析：正確答案是 B（示範）" },
+          ]
+        }
+      }
     };
 
-    function qs(sel){ return document.querySelector(sel); }
+    let state = {
+      version: 1,
+      current: { level: "topicMenu", topicId: null, lessonId: null },
+      progress: {},
+      progressSeen: {},
+      quiz: {},
+      quizRuntime: null,
+      logs: []
+    };
 
+    function nowTs(){ return Date.now(); }
+    function logEvent(type, extra={}){
+      state.logs.push({ ts: nowTs(), type, ...extra });
+      saveState();
+    }
+
+    function saveState(){
+      try { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state)); } catch(e){}
+    }
+    function loadState(){
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_STATE);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') state = parsed;
+      } catch(e){}
+    }
+
+    function qs(sel){ return document.querySelector(sel); }
     function setVisible(sel, visible){
       const el = qs(sel);
       if (!el) return;
       el.setAttribute('visible', !!visible);
     }
-
-    function setHudText(text){
-      const hud = qs('#hudText');
-      if (!hud) return;
-      hud.setAttribute('text', 'value', text);
+    function setText(sel, value){
+      const el = qs(sel);
+      if (!el) return;
+      el.setAttribute('text', 'value', value);
     }
 
-    // ✅ 核心：確保 hubMenu / backMenu 永遠互斥
-    function updateMenus(sceneId){
-      const hub = qs('#hubMenu');
-      const back = qs('#backMenu');
-      if (!hub || !back) return;
-
-      // 先全部關閉，避免任何狀態殘留
-      hub.setAttribute('visible', false);
-      back.setAttribute('visible', false);
-
-      const isHub = !!SCENES[sceneId]?.isHub;
-      hub.setAttribute('visible', isHub);
-      back.setAttribute('visible', !isHub);
-
-      // 保險：若你不小心殘留舊選單，直接關掉
-      setVisible('#sceneMenu', false);
+    function hideAllPages(){
+      setVisible('#pageTopicMenu', false);
+      setVisible('#pageHub', false);
+      setVisible('#pageLesson', false);
+      setVisible('#pageQuiz', false);
     }
 
-    // ====== 避免互相干擾：面板開啟時，暫停其他按鈕點擊 ======
-    function setHotspotsEnabled(enabled){
-      // 只針對 hotspots（我們用 data-hotspot="true" 標記）
+    function setSky(srcSelector){
+      const sky = qs('#sky');
+      if (!sky) return;
+      sky.setAttribute('material', 'src', srcSelector);
+    }
+
+    function setHud(title){
+      const name = localStorage.getItem(STORAGE_KEY_NAME) || '未命名';
+      setText('#hudText', `${name}｜${title}`);
+    }
+
+    function setClickableLock(locked){
       document.querySelectorAll('[data-hotspot="true"]').forEach(el => {
-        if (enabled) el.classList.add('clickable');
-        else el.classList.remove('clickable');
+        if (locked) el.classList.remove('clickable');
+        else el.classList.add('clickable');
       });
-
-      // Hub / Back menu 的按鈕也一起管控（面板開啟時不讓誤觸）
-      ['#hubMenu', '#backMenu'].forEach(sel => {
-        const menu = qs(sel);
-        if (!menu) return;
-        menu.querySelectorAll('[data-ui="true"]').forEach(btn => {
-          if (enabled) btn.classList.add('clickable');
-          else btn.classList.remove('clickable');
-        });
+      document.querySelectorAll('[data-ui="true"]').forEach(el => {
+        if (locked) el.classList.remove('clickable');
+        else el.classList.add('clickable');
       });
-
-      // 關閉按鈕永遠可點（由 HTML 保持 clickable）
       qs('#infoCloseBtn')?.classList.add('clickable');
+    }
+
+    function closeInfoPanel(){
+      setVisible('#infoPanel', false);
+      setClickableLock(false);
+    }
+
+    function goTopicMenu(){
+      state.current = { level: "topicMenu", topicId: null, lessonId: null };
+      saveState();
+      closeInfoPanel();
+
+      hideAllPages();
+      setSky('#pano_topic_menu');
+      setHud('Topic 選單');
+      setVisible('#pageTopicMenu', true);
+
+      logEvent('nav_topic_menu', {});
+    }
+
+    function initLessonProgress(lesson){
+      if (!state.progress[lesson.id]) {
+        state.progress[lesson.id] = {
+          doneHotspots: 0,
+          totalHotspots: lesson.totalHotspots || 5,
+          completed: false
+        };
+      } else {
+        state.progress[lesson.id].totalHotspots = lesson.totalHotspots || state.progress[lesson.id].totalHotspots || 5;
+      }
+      state.progressSeen ||= {};
+      state.progressSeen[lesson.id] ||= {};
+      saveState();
+    }
+
+    function isTopicComplete(topicId){
+      const topic = TOPICS[topicId];
+      if (!topic) return false;
+      for (const lesson of topic.lessons) {
+        initLessonProgress(lesson);
+        if (!state.progress[lesson.id]?.completed) return false;
+      }
+      return true;
+    }
+
+    function refreshHubUI(topicId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+
+      setText('#hubTitle', `${topic.name}`);
+      setText('#hubObjectives', topic.objectives.map((o,i)=>`${i+1}. ${o}`).join('\\n'));
+
+      topic.lessons.forEach((lesson, idx) => {
+        initLessonProgress(lesson);
+        const p = state.progress[lesson.id];
+        const percent = Math.round((p.doneHotspots / p.totalHotspots) * 100);
+        setText(`#hubLessonLabel${idx+1}`, `${lesson.name}\\n${percent}%`);
+
+        const fill = qs(`#hubBarFill${idx+1}`);
+        if (fill) {
+          fill.setAttribute('scale', `${Math.max(0, Math.min(1, p.doneHotspots / p.totalHotspots))} 1 1`);
+        }
+      });
+
+      const unlocked = isTopicComplete(topicId);
+      setText('#hubQuizStatus', unlocked ? '測驗：已解鎖' : '測驗：完成所有單元後解鎖');
+
+      const quizState = state.quiz[topicId];
+      const quizBtn = qs('#btnStartQuiz');
+      if (quizBtn) {
+        const canStart = unlocked && !(quizState && quizState.done);
+        quizBtn.setAttribute('material', 'color', canStart ? '#2f7cff' : '#444');
+        quizBtn.setAttribute('data-enabled', canStart ? 'true' : 'false');
+      }
+
+      if (quizState && quizState.done) {
+        const acc = Math.round((quizState.score / quizState.total) * 100);
+        const lines = [
+          `測驗完成 ✅  正確率：${acc}%（${quizState.score}/${quizState.total}）`,
+          '',
+          ...quizState.details.map((d, i) => `Q${i+1}：${d.correct ? '✅' : '❌'}  ${d.explain}`)
+        ];
+        setVisible('#hubQuizResultPanel', true);
+        setText('#hubQuizResultText', lines.join('\\n'));
+      } else {
+        setVisible('#hubQuizResultPanel', false);
+        setText('#hubQuizResultText', '');
+      }
+    }
+
+    function hideAllHotspotGroups(){
+      for (const t of Object.values(TOPICS)) {
+        for (const lesson of t.lessons) {
+          setVisible(lesson.hotspotsGroup, false);
+        }
+      }
+    }
+
+    function patchHubLessonButtons(topicId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+
+      const btns = [qs('#btnLesson1'), qs('#btnLesson2'), qs('#btnLesson3')];
+      topic.lessons.forEach((lesson, idx) => {
+        const btn = btns[idx];
+        if (!btn) return;
+        btn.setAttribute('ui-action', `action: goLesson; a: ${topicId}; b: ${lesson.id}`);
+      });
+
+      const backBtn = qs('#btnBackToHub');
+      if (backBtn) backBtn.setAttribute('ui-action', `action: goHub; a: ${topicId}`);
+
+      const quizBtn = qs('#btnStartQuiz');
+      if (quizBtn) quizBtn.setAttribute('ui-action', `action: startQuiz; a: ${topicId}`);
+    }
+
+    function goHub(topicId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+
+      patchHubLessonButtons(topicId);
+
+      state.current = { level: "hub", topicId, lessonId: null };
+      saveState();
+      closeInfoPanel();
+
+      hideAllPages();
+      setSky(topic.hubPano);
+      setHud(`Hub｜${topic.name}`);
+
+      setVisible('#pageHub', true);
+      refreshHubUI(topicId);
+
+      logEvent('nav_hub', { topicId });
+    }
+
+    function goLesson(topicId, lessonId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+      const lesson = topic.lessons.find(x => x.id === lessonId);
+      if (!lesson) return;
+
+      state.current = { level: "lesson", topicId, lessonId };
+      saveState();
+      closeInfoPanel();
+
+      hideAllPages();
+      setSky(lesson.pano);
+      setHud(`${topic.name}｜${lesson.name}`);
+
+      setVisible('#pageLesson', true);
+      hideAllHotspotGroups();
+      setVisible(lesson.hotspotsGroup, true);
+
+      initLessonProgress(lesson);
+
+      logEvent('nav_lesson', { topicId, lessonId });
     }
 
     function faceCameraYaw(panelEl){
@@ -131,12 +356,33 @@
       panelEl.setAttribute('rotation', `0 ${yaw} 0`);
     }
 
-    // ====== Hotspot -> 在旁邊顯示圖片面板 ======
+    function markHotspotDone(topicId, lessonId, hotspotId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+      const lesson = topic.lessons.find(x => x.id === lessonId);
+      if (!lesson) return;
+
+      initLessonProgress(lesson);
+      const p = state.progress[lesson.id];
+
+      if (state.progressSeen?.[lesson.id]?.[hotspotId]) return;
+      state.progressSeen[lesson.id][hotspotId] = true;
+
+      p.doneHotspots = Math.min(p.totalHotspots, (p.doneHotspots || 0) + 1);
+      p.completed = (p.doneHotspots >= p.totalHotspots);
+      saveState();
+
+      logEvent('hotspot_open', { topicId, lessonId, data: { hotspotId } });
+
+      // 若回到 Hub，進度會更新；如果你想在 lesson 當下也顯示提示，可以加 HUD flash
+    }
+
     AFRAME.registerComponent('hotspot-panel', {
       schema: {
-        img: { type: 'selector' },      // e.g., img: #s2_h1
-        side: { default: 'right' },     // right / left / up / down
-        distance: { default: 0.65 }     // 面板離 hotspot 的距離
+        img: { type: 'selector' },
+        side: { default: 'right' },
+        distance: { default: 0.65 },
+        hid: { default: '' }
       },
       init: function(){
         this.onClick = () => {
@@ -144,11 +390,16 @@
           const imgPlane = qs('#infoImage');
           if (!panel || !imgPlane || !window.THREE) return;
 
-          // 1) 換圖
+          const { topicId, lessonId } = state.current || {};
+          if (!topicId || !lessonId) return;
+
+          const hotspotId = this.data.hid || this.el.getAttribute('id') || ('hs_' + Math.random());
+          markHotspotDone(topicId, lessonId, hotspotId);
+
           const imgEl = this.data.img;
           if (imgEl) imgPlane.setAttribute('material', 'src', `#${imgEl.id}`);
+          else imgPlane.setAttribute('material', 'color', '#222');
 
-          // 2) 面板位置：hotspot 世界座標 + 偏移
           const p = new THREE.Vector3();
           this.el.object3D.getWorldPosition(p);
 
@@ -161,12 +412,9 @@
           p.add(offset);
           panel.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
           panel.setAttribute('visible', true);
-
-          // 3) 面板面向相機（只旋轉 Y 軸）
           faceCameraYaw(panel);
 
-          // 4) 避免干擾：面板開啟時，關閉其他 hotspot / UI 的點擊
-          setHotspotsEnabled(false);
+          setClickableLock(true);
         };
         this.el.addEventListener('click', this.onClick);
       },
@@ -175,71 +423,152 @@
       }
     });
 
-    // ====== 切換場景 Component ======
-    AFRAME.registerComponent('scene-switch', {
-      schema: { to: {type:'string'} },
-      init: function () {
-        this.onClick = this.onClick.bind(this);
+    function startQuiz(topicId){
+      if (!isTopicComplete(topicId)) return;
+      if (state.quiz[topicId]?.done) return;
+
+      closeInfoPanel();
+      hideAllPages();
+      setVisible('#pageQuiz', true);
+      setHud(`測驗｜${TOPICS[topicId].name}`);
+
+      state.quizRuntime = { topicId, idx: 0, chosen: [] };
+      saveState();
+
+      renderQuizQuestion();
+      logEvent('quiz_start', { topicId });
+    }
+
+    function renderQuizQuestion(){
+      const rt = state.quizRuntime;
+      if (!rt) return;
+      const topic = TOPICS[rt.topicId];
+      const qObj = topic.quiz.questions[rt.idx];
+
+      setText('#quizTitle', `${topic.name}｜小測驗（${rt.idx+1}/${topic.quiz.questions.length}）`);
+      setText('#quizQuestion', qObj.q);
+
+      qObj.options.forEach((opt, i) => {
+        setText(`#quizOptText${i+1}`, opt);
+        const btn = qs(`#quizOptBtn${i+1}`);
+        if (btn) btn.setAttribute('material', 'color', '#333');
+      });
+
+      setText('#quizNextText', (rt.idx < topic.quiz.questions.length-1) ? '下一題' : '提交');
+    }
+
+    function chooseOption(optIndex){
+      const rt = state.quizRuntime;
+      if (!rt) return;
+      const topic = TOPICS[rt.topicId];
+      const qObj = topic.quiz.questions[rt.idx];
+
+      rt.chosen[rt.idx] = optIndex;
+      saveState();
+
+      for (let i=0;i<qObj.options.length;i++){
+        const btn = qs(`#quizOptBtn${i+1}`);
+        if (btn) btn.setAttribute('material', 'color', (i===optIndex) ? '#2f7cff' : '#333');
+      }
+
+      logEvent('quiz_choose', { topicId: rt.topicId, data: { q: rt.idx, choice: optIndex } });
+    }
+
+    function nextOrSubmitQuiz(){
+      const rt = state.quizRuntime;
+      if (!rt) return;
+      const topic = TOPICS[rt.topicId];
+      const total = topic.quiz.questions.length;
+
+      if (rt.chosen[rt.idx] === undefined) return;
+
+      if (rt.idx < total-1){
+        rt.idx += 1;
+        saveState();
+        renderQuizQuestion();
+        return;
+      }
+
+      let score = 0;
+      const details = topic.quiz.questions.map((q, i) => {
+        const chosen = rt.chosen[i];
+        const correct = (chosen === q.answer);
+        if (correct) score += 1;
+        return { chosen, correct, explain: q.explain };
+      });
+
+      state.quiz[rt.topicId] = {
+        done: true,
+        score,
+        total,
+        answers: rt.chosen.slice(),
+        details,
+        ts: nowTs()
+      };
+      state.quizRuntime = null;
+      saveState();
+
+      logEvent('quiz_submit', { topicId: rt.topicId, data: { score, total } });
+
+      goHub(rt.topicId);
+    }
+
+    function downloadLog(){
+      try{
+        const name = localStorage.getItem(STORAGE_KEY_NAME) || 'user';
+        const payload = JSON.stringify(state, null, 2);
+        const blob = new Blob([payload], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `svvr_log_${name}_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        logEvent('download_log', {});
+      }catch(e){}
+    }
+
+    AFRAME.registerComponent('ui-action', {
+      schema: { action: {type:'string'}, a: {type:'string'}, b:{type:'string'} },
+      init: function(){
+        this.onClick = () => {
+          const act = this.data.action;
+
+          if (act === 'goTopicMenu') return goTopicMenu();
+          if (act === 'goHub')       return goHub(this.data.a);
+          if (act === 'goLesson')    return goLesson(this.data.a, this.data.b);
+          if (act === 'startQuiz') {
+            // button may be visually disabled; still hard-block here
+            if (qs('#btnStartQuiz')?.getAttribute('data-enabled') !== 'true') return;
+            return startQuiz(this.data.a);
+          }
+          if (act === 'chooseOpt')   return chooseOption(parseInt(this.data.a,10));
+          if (act === 'nextQuiz')    return nextOrSubmitQuiz();
+          if (act === 'closeInfo')   return closeInfoPanel();
+          if (act === 'downloadLog') return downloadLog();
+          if (act === 'openGPT') {
+            alert('GPT API：骨架先留按鈕，之後再接後端。');
+            return;
+          }
+        };
         this.el.addEventListener('click', this.onClick);
       },
-      remove: function () {
+      remove: function(){
         this.el.removeEventListener('click', this.onClick);
-      },
-      onClick: function () {
-        const targetId = this.data.to;
-        const target = SCENES[targetId];
-        if (!target) return;
-
-        const current = window.__CURRENT_SCENE__ || 's1';
-        if (current === targetId) return;
-
-        const sky  = qs('#sky');
-        const fade = qs('#fadePlane');
-        if (!sky || !fade) return;
-
-        // 淡出
-        fade.setAttribute('visible', true);
-        fade.emit('fadeOut');
-
-        setTimeout(() => {
-          // 換 sky
-          sky.setAttribute('material', 'src', target.panoAsset);
-
-          // 切換知識點群組
-          setVisible(SCENES[current].hotspotGroup, false);
-          setVisible(target.hotspotGroup, true);
-
-          // 切換時關閉面板、恢復點擊
-          setVisible('#infoPanel', false);
-          setHotspotsEnabled(true);
-
-          // 記錄當前場景
-          window.__CURRENT_SCENE__ = targetId;
-
-          // HUD 更新
-          const name = localStorage.getItem(STORAGE_KEY) || '未命名';
-          setHudText(`${name}｜${target.label}`);
-
-          // ✅ 互斥選單更新
-          updateMenus(targetId);
-
-          // 淡入
-          fade.emit('fadeIn');
-          setTimeout(() => fade.setAttribute('visible', false), 260);
-        }, 240);
       }
     });
 
-    // ====== 名字 Gate + 關閉按鈕 ======
     window.addEventListener('DOMContentLoaded', () => {
+      loadState();
+
+      // Name Gate
       const gate  = document.getElementById('nameGate');
       const input = document.getElementById('studentNameInput');
       const btn   = document.getElementById('startBtn');
 
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        gate.style.display = 'none';
-      } else {
+      const savedName = localStorage.getItem(STORAGE_KEY_NAME);
+      if (savedName) gate.style.display = 'none';
+      else {
         gate.style.display = 'flex';
         setTimeout(() => input && input.focus(), 50);
       }
@@ -247,27 +576,26 @@
       function start(){
         const name = (input?.value || '').trim();
         if (!name) { input && input.focus(); return; }
-        localStorage.setItem(STORAGE_KEY, name);
+        localStorage.setItem(STORAGE_KEY_NAME, name);
         gate.style.display = 'none';
-        setHudText(`${name}｜${SCENES[window.__CURRENT_SCENE__ || 's1'].label}`);
+        goTopicMenu();
       }
-
       btn?.addEventListener('click', start);
       input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
 
-      // 關閉面板
-      const closeBtn = qs('#infoCloseBtn');
-      const panel = qs('#infoPanel');
-      closeBtn?.addEventListener('click', () => {
-        panel?.setAttribute('visible', false);
-        setHotspotsEnabled(true);
-      });
+      // Restore navigation if name exists
+      if (savedName) {
+        const cur = state.current || { level: "topicMenu" };
+        if (cur.level === 'hub' && cur.topicId) return goHub(cur.topicId);
+        if (cur.level === 'lesson' && cur.topicId && cur.lessonId) return goLesson(cur.topicId, cur.lessonId);
+        return goTopicMenu();
+      }
     });
   </script>
 </head>
 
 <body style="margin:0; background:#000;">
-  <!-- 開頭輸入名字 -->
+  <!-- Name Gate -->
   <div id="nameGate" style="display:none;">
     <div id="nameCard">
       <h2>請輸入姓名</h2>
@@ -276,168 +604,241 @@
         <input id="studentNameInput" placeholder="輸入名字..." autocomplete="name" />
         <button id="startBtn">開始體驗</button>
       </div>
-      <div id="hint">提示：目前使用 localStorage，避免 iOS 偶發重整後又要重填。</div>
+      <div id="hint">提示：狀態會存於 localStorage，避免 iOS 偶發重整導致進度丟失。</div>
     </div>
   </div>
 
   <a-scene renderer="colorManagement: true; physicallyCorrectLights: false" vr-mode-ui="enabled: true">
     <a-assets>
-      <!-- 360 全景（換成你自己的檔案） -->
-      <img id="pano1" src="pano/scene1.jpg" crossorigin="anonymous">
-      <img id="pano2" src="pano/scene2.jpg" crossorigin="anonymous">
-      <img id="pano3" src="pano/scene3.jpg" crossorigin="anonymous">
-      <img id="pano4" src="pano/scene4.jpg" crossorigin="anonymous">
+      <img id="pano_topic_menu" src="pano/topic_menu.jpg" crossorigin="anonymous">
 
-      <!-- 15 張資訊圖片（依你的檔名替換） -->
-      <img id="s2_h1" src="info/s2_h1.png" crossorigin="anonymous">
-      <img id="s2_h2" src="info/s2_h2.png" crossorigin="anonymous">
-      <img id="s2_h3" src="info/s2_h3.png" crossorigin="anonymous">
-      <img id="s2_h4" src="info/s2_h4.png" crossorigin="anonymous">
-      <img id="s2_h5" src="info/s2_h5.png" crossorigin="anonymous">
+      <img id="pano_t1_hub" src="pano/t1_hub.jpg" crossorigin="anonymous">
+      <img id="pano_t1_l1"  src="pano/t1_l1.jpg" crossorigin="anonymous">
+      <img id="pano_t1_l2"  src="pano/t1_l2.jpg" crossorigin="anonymous">
+      <img id="pano_t1_l3"  src="pano/t1_l3.jpg" crossorigin="anonymous">
 
-      <img id="s3_h1" src="info/s3_h1.png" crossorigin="anonymous">
-      <img id="s3_h2" src="info/s3_h2.png" crossorigin="anonymous">
-      <img id="s3_h3" src="info/s3_h3.png" crossorigin="anonymous">
-      <img id="s3_h4" src="info/s3_h4.png" crossorigin="anonymous">
-      <img id="s3_h5" src="info/s3_h5.png" crossorigin="anonymous">
+      <img id="pano_t2_hub" src="pano/t2_hub.jpg" crossorigin="anonymous">
+      <img id="pano_t2_l1"  src="pano/t2_l1.jpg" crossorigin="anonymous">
+      <img id="pano_t2_l2"  src="pano/t2_l2.jpg" crossorigin="anonymous">
+      <img id="pano_t2_l3"  src="pano/t2_l3.jpg" crossorigin="anonymous">
 
-      <img id="s4_h1" src="info/s4_h1.png" crossorigin="anonymous">
-      <img id="s4_h2" src="info/s4_h2.png" crossorigin="anonymous">
-      <img id="s4_h3" src="info/s4_h3.png" crossorigin="anonymous">
-      <img id="s4_h4" src="info/s4_h4.png" crossorigin="anonymous">
-      <img id="s4_h5" src="info/s4_h5.png" crossorigin="anonymous">
+      <img id="pano_t3_hub" src="pano/t3_hub.jpg" crossorigin="anonymous">
+      <img id="pano_t3_l1"  src="pano/t3_l1.jpg" crossorigin="anonymous">
+      <img id="pano_t3_l2"  src="pano/t3_l2.jpg" crossorigin="anonymous">
+      <img id="pano_t3_l3"  src="pano/t3_l3.jpg" crossorigin="anonymous">
+
+      <img id="info_placeholder" src="info/placeholder.png" crossorigin="anonymous">
     </a-assets>
 
-    <!-- 360 背景 -->
-    <a-sky id="sky" radius="10" src="#pano1"></a-sky>
+    <a-sky id="sky" radius="10" src="#pano_topic_menu"></a-sky>
 
-    <!-- 淡入淡出遮罩 -->
-    <a-plane id="fadePlane"
-      position="0 1.6 -0.5"
-      width="2" height="2"
-      material="color: #000; opacity: 0; transparent: true; shader: flat"
-      visible="false"
-      animation__out="property: material.opacity; to: 1; dur: 220; startEvents: fadeOut; easing: easeInQuad"
-      animation__in="property: material.opacity; to: 0; dur: 240; startEvents: fadeIn; easing: easeOutQuad">
-    </a-plane>
-
-    <!-- HUD：名字與場景 -->
     <a-entity id="hud" position="0 1.75 -1.2">
       <a-entity id="hudText"
-        text="value: ; align: center; width: 2.2; color: #FFFFFF; wrapCount: 24"
+        text="value: ; align: center; width: 2.4; color: #FFFFFF; wrapCount: 26"
         position="0 0 0">
       </a-entity>
     </a-entity>
 
-    <!-- ✅ 圖片面板：顯示在 hotspot 旁邊（不跟相機走） -->
+    <!-- Page: Topic Menu -->
+    <a-entity id="pageTopicMenu" visible="true" position="0 1.25 -2.0">
+      <a-plane width="2.0" height="0.55" material="shader: flat; color: #111; opacity: 0.9"></a-plane>
+      <a-entity text="value: 請選擇 Topic; align: center; width: 3; color: #fff"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: goHub; a: t1"
+             position="-1.0 -0.65 0" scale="0.75 0.28 0.1" color="#2f7cff"></a-box>
+      <a-entity text="value: Topic 1; align: center; width: 2; color: #fff"
+                position="-1.0 -0.65 0.06"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: goHub; a: t2"
+             position="0.0 -0.65 0" scale="0.75 0.28 0.1" color="#2f7cff"></a-box>
+      <a-entity text="value: Topic 2; align: center; width: 2; color: #fff"
+                position="0.0 -0.65 0.06"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: goHub; a: t3"
+             position="1.0 -0.65 0" scale="0.75 0.28 0.1" color="#2f7cff"></a-box>
+      <a-entity text="value: Topic 3; align: center; width: 2; color: #fff"
+                position="1.0 -0.65 0.06"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: downloadLog"
+             position="0 -1.15 0" scale="1.2 0.22 0.1" color="#333"></a-box>
+      <a-entity text="value: 下載 log（JSON）; align: center; width: 3; color: #fff"
+                position="0 -1.15 0.06"></a-entity>
+    </a-entity>
+
+    <!-- Page: Hub -->
+    <a-entity id="pageHub" visible="false">
+      <a-entity position="0 1.25 -2.0">
+        <a-box data-ui="true" class="clickable" ui-action="action: goTopicMenu"
+               position="-1.2 0.55 0" scale="0.7 0.22 0.1" color="#444"></a-box>
+        <a-entity text="value: 回 Topic; align: center; width: 2.2; color: #fff"
+                  position="-1.2 0.55 0.06"></a-entity>
+
+        <a-box data-ui="true" class="clickable" ui-action="action: openGPT"
+               position="1.2 0.55 0" scale="0.7 0.22 0.1" color="#444"></a-box>
+        <a-entity text="value: GPT; align: center; width: 2.2; color: #fff"
+                  position="1.2 0.55 0.06"></a-entity>
+
+        <a-plane width="2.4" height="0.45" position="0 0.25 0"
+                 material="shader: flat; color:#111; opacity:0.9"></a-plane>
+        <a-entity id="hubTitle" text="value: ; align: center; width: 3.2; color:#fff"
+                  position="0 0.25 0.01"></a-entity>
+
+        <a-plane width="2.4" height="0.85" position="0 -0.32 0"
+                 material="shader: flat; color:#111; opacity:0.9"></a-plane>
+        <a-entity id="hubObjectives" text="value: ; align: left; width: 2.2; color:#fff; wrapCount: 28; baseline: top"
+                  position="-1.1 0.05 0.01"></a-entity>
+
+        <a-box data-ui="true" class="clickable" id="btnLesson1"
+               ui-action="action: goLesson; a: t1; b: t1_l1"
+               position="-0.8 -1.15 0" scale="0.9 0.28 0.1" color="#2f7cff"></a-box>
+        <a-entity id="hubLessonLabel1" text="value: ; align: center; width: 2.2; color:#fff"
+                  position="-0.8 -1.15 0.06"></a-entity>
+        <a-plane width="0.9" height="0.06" position="-0.8 -1.35 0" material="shader: flat; color:#333; opacity:0.95"></a-plane>
+        <a-plane id="hubBarFill1" width="0.9" height="0.06" position="-1.25 -1.35 0.01"
+                 scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.95"></a-plane>
+
+        <a-box data-ui="true" class="clickable" id="btnLesson2"
+               ui-action="action: goLesson; a: t1; b: t1_l2"
+               position="0 -1.15 0" scale="0.9 0.28 0.1" color="#2f7cff"></a-box>
+        <a-entity id="hubLessonLabel2" text="value: ; align: center; width: 2.2; color:#fff"
+                  position="0 -1.15 0.06"></a-entity>
+        <a-plane width="0.9" height="0.06" position="0 -1.35 0" material="shader: flat; color:#333; opacity:0.95"></a-plane>
+        <a-plane id="hubBarFill2" width="0.9" height="0.06" position="-0.45 -1.35 0.01"
+                 scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.95"></a-plane>
+
+        <a-box data-ui="true" class="clickable" id="btnLesson3"
+               ui-action="action: goLesson; a: t1; b: t1_l3"
+               position="0.8 -1.15 0" scale="0.9 0.28 0.1" color="#2f7cff"></a-box>
+        <a-entity id="hubLessonLabel3" text="value: ; align: center; width: 2.2; color:#fff"
+                  position="0.8 -1.15 0.06"></a-entity>
+        <a-plane width="0.9" height="0.06" position="0.8 -1.35 0" material="shader: flat; color:#333; opacity:0.95"></a-plane>
+        <a-plane id="hubBarFill3" width="0.9" height="0.06" position="0.35 -1.35 0.01"
+                 scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.95"></a-plane>
+
+        <a-plane width="2.4" height="0.28" position="0 -1.65 0" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+        <a-entity id="hubQuizStatus" text="value: ; align: center; width: 3; color:#fff"
+                  position="0 -1.65 0.01"></a-entity>
+
+        <a-box data-ui="true" class="clickable" id="btnStartQuiz"
+               ui-action="action: startQuiz; a: t1"
+               position="0 -1.95 0" scale="1.2 0.24 0.1" color="#444"></a-box>
+        <a-entity id="btnStartQuizLabel" text="value: 開始小測驗（一次性）; align: center; width: 3; color:#fff"
+                  position="0 -1.95 0.06"></a-entity>
+
+        <a-entity id="hubQuizResultPanel" visible="false" position="0 -2.45 0">
+          <a-plane width="2.4" height="1.1" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+          <a-entity id="hubQuizResultText" text="value: ; align: left; width: 2.2; color:#fff; wrapCount: 34; baseline: top"
+                    position="-1.1 0.5 0.01"></a-entity>
+        </a-entity>
+      </a-entity>
+    </a-entity>
+
+    <!-- Page: Lesson -->
+    <a-entity id="pageLesson" visible="false" position="0 1.25 -2.0">
+      <a-box data-ui="true" class="clickable" id="btnBackToHub"
+             ui-action="action: goHub; a: t1"
+             position="0 0.55 0" scale="0.9 0.24 0.1" color="#444"></a-box>
+      <a-entity text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 0.55 0.06"></a-entity>
+    </a-entity>
+
+    <!-- Page: Quiz -->
+    <a-entity id="pageQuiz" visible="false" position="0 1.15 -2.0">
+      <a-plane width="2.6" height="0.4" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity id="quizTitle" text="value: ; align: center; width: 3.6; color:#fff"
+                position="0 0 0.01"></a-entity>
+
+      <a-plane width="2.6" height="0.75" position="0 -0.55 0" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity id="quizQuestion" text="value: ; align: left; width: 2.45; color:#fff; wrapCount: 34"
+                position="-1.25 -0.25 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="quizOptBtn1" ui-action="action: chooseOpt; a: 0"
+             position="0 -1.2 0" scale="2.0 0.22 0.1" color="#333"></a-box>
+      <a-entity id="quizOptText1" text="value: ; align: center; width: 3.2; color:#fff"
+                position="0 -1.2 0.06"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="quizOptBtn2" ui-action="action: chooseOpt; a: 1"
+             position="0 -1.5 0" scale="2.0 0.22 0.1" color="#333"></a-box>
+      <a-entity id="quizOptText2" text="value: ; align: center; width: 3.2; color:#fff"
+                position="0 -1.5 0.06"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="quizOptBtn3" ui-action="action: chooseOpt; a: 2"
+             position="0 -1.8 0" scale="2.0 0.22 0.1" color="#333"></a-box>
+      <a-entity id="quizOptText3" text="value: ; align: center; width: 3.2; color:#fff"
+                position="0 -1.8 0.06"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="quizNextBtn" ui-action="action: nextQuiz"
+             position="0 -2.15 0" scale="1.2 0.24 0.1" color="#2f7cff"></a-box>
+      <a-entity id="quizNextText" text="value: 下一題; align: center; width: 2.6; color:#fff"
+                position="0 -2.15 0.06"></a-entity>
+    </a-entity>
+
+    <!-- Info Panel -->
     <a-entity id="infoPanel" visible="false">
-      <a-plane id="infoBg" width="1.2" height="0.8"
-               material="shader: flat; color: #111; opacity: 0.92"></a-plane>
-
+      <a-plane width="1.2" height="0.8" material="shader: flat; color: #111; opacity: 0.92"></a-plane>
       <a-plane id="infoImage" width="1.08" height="0.62" position="0 0 0.01"
-               material="shader: flat; transparent: true"></a-plane>
+               material="shader: flat; transparent: true; src: #info_placeholder"></a-plane>
 
-      <a-plane id="infoCloseBtn" class="clickable" width="0.24" height="0.14"
-               position="0.49 0.33 0.02"
-               material="shader: flat; color: #333; opacity: 0.98">
-        <a-entity text="value: 關閉; align: center; width: 2; color: #fff"
-                  position="0 0 0.01"></a-entity>
-      </a-plane>
+      <a-plane id="infoCloseBtn" class="clickable" data-ui="true" ui-action="action: closeInfo"
+               width="0.24" height="0.14" position="0.49 0.33 0.02"
+               material="shader: flat; color: #333; opacity: 0.98"></a-plane>
+      <a-entity text="value: 關閉; align: center; width: 2; color: #fff"
+                position="0.49 0.33 0.03"></a-entity>
     </a-entity>
 
-    <!-- ✅ Hub 主介面：只在 s1 顯示（切換所有場景 + 進度按鈕） -->
-    <a-entity id="hubMenu" position="0 1.3 -2" visible="true">
-      <a-box data-ui="true" class="clickable" scene-switch="to: s2" position="-1 0 0" scale="0.5 0.5 0.1" color="tomato"></a-box>
-      <a-box data-ui="true" class="clickable" scene-switch="to: s3" position="0 0 0"  scale="0.5 0.5 0.1" color="skyblue"></a-box>
-      <a-box data-ui="true" class="clickable" scene-switch="to: s4" position="1 0 0"  scale="0.5 0.5 0.1" color="yellowgreen"></a-box>
-
-      <a-box data-ui="true" class="clickable" id="progressBtn" position="0 -0.7 0" scale="0.7 0.25 0.1" color="#222"></a-box>
-      <a-entity text="value: 進度; align: center; width: 2; color: #fff"
-        position="0 -0.7 0.06"></a-entity>
+    <!-- Hotspots groups（Topic1 完整示範 3 個 lesson；Topic2/3 你之後照抄即可） -->
+    <a-entity id="hotspots-t1_l1" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.4 2.0 -3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.4 1.6 -2.8" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l1_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.9 1.3 -2.9"  material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l1_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.6 1.1 -3.1"  material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l1_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.1 0.8 -2.6"   material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: up; distance: 0.70; hid: t1_l1_h5"></a-sphere>
     </a-entity>
 
-    <!-- ✅ 內容場景：只在 s2/s3/s4 顯示（只留回主介面） -->
-    <a-entity id="backMenu" position="0 1.3 -2" visible="false">
-      <a-box data-ui="true" class="clickable" scene-switch="to: s1" position="0 0 0" scale="0.7 0.25 0.1" color="#444"></a-box>
-      <a-entity text="value: 回主介面; align: center; width: 3; color: #fff"
-        position="0 0 0.06"></a-entity>
+    <a-entity id="hotspots-t1_l2" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.5 2.1 -3.0" material="shader: flat; color:#4FC3F7"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.2 1.7 -2.7" material="shader: flat; color:#4FC3F7"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l2_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.2 1.45 -3.0" material="shader: flat; color:#4FC3F7"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l2_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.4 1.05 -2.5" material="shader: flat; color:#4FC3F7"
+                hotspot-panel="img: #info_placeholder; side: up; distance: 0.70; hid: t1_l2_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.0 0.75 -2.8" material="shader: flat; color:#4FC3F7"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 0.70; hid: t1_l2_h5"></a-sphere>
     </a-entity>
 
-    <!-- ====== Hotspots（每個場景 5 個，位置分散：上/中/下） ====== -->
-    <a-entity id="hotspots-s1" visible="true"></a-entity>
-
-    <a-entity id="hotspots-s2" visible="false">
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.6 2.0 -3.0"
-                material="shader: flat; color: #FFD54F"
-                hotspot-panel="img: #s2_h1; side: right; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.6 1.6 -2.8"
-                material="shader: flat; color: #FFD54F"
-                hotspot-panel="img: #s2_h2; side: left; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.8 1.3 -2.9"
-                material="shader: flat; color: #FFD54F"
-                hotspot-panel="img: #s2_h3; side: right; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.6 1.1 -3.1"
-                material="shader: flat; color: #FFD54F"
-                hotspot-panel="img: #s2_h4; side: left; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.0 0.8 -2.6"
-                material="shader: flat; color: #FFD54F"
-                hotspot-panel="img: #s2_h5; side: up; distance: 0.70"></a-sphere>
+    <a-entity id="hotspots-t1_l3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.6 2.0 -3.0" material="shader: flat; color:#A5D6A7"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.6 1.6 -2.8" material="shader: flat; color:#A5D6A7"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l3_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.8 1.3 -2.9"  material="shader: flat; color:#A5D6A7"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l3_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.55 1.0 -3.1" material="shader: flat; color:#A5D6A7"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l3_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.1 0.7 -2.6"  material="shader: flat; color:#A5D6A7"
+                hotspot-panel="img: #info_placeholder; side: up; distance: 0.70; hid: t1_l3_h5"></a-sphere>
     </a-entity>
 
-    <a-entity id="hotspots-s3" visible="false">
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.4 2.05 -2.9"
-                material="shader: flat; color: #4FC3F7"
-                hotspot-panel="img: #s3_h1; side: right; distance: 0.65"></a-sphere>
+    <a-entity id="hotspots-t2_l1" visible="false"></a-entity>
+    <a-entity id="hotspots-t2_l2" visible="false"></a-entity>
+    <a-entity id="hotspots-t2_l3" visible="false"></a-entity>
 
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.2 1.7 -2.7"
-                material="shader: flat; color: #4FC3F7"
-                hotspot-panel="img: #s3_h2; side: left; distance: 0.65"></a-sphere>
+    <a-entity id="hotspots-t3_l1" visible="false"></a-entity>
+    <a-entity id="hotspots-t3_l2" visible="false"></a-entity>
+    <a-entity id="hotspots-t3_l3" visible="false"></a-entity>
 
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.2 1.45 -3.0"
-                material="shader: flat; color: #4FC3F7"
-                hotspot-panel="img: #s3_h3; side: right; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.4 1.05 -2.5"
-                material="shader: flat; color: #4FC3F7"
-                hotspot-panel="img: #s3_h4; side: up; distance: 0.70"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.0 0.75 -2.8"
-                material="shader: flat; color: #4FC3F7"
-                hotspot-panel="img: #s3_h5; side: down; distance: 0.70"></a-sphere>
-    </a-entity>
-
-    <a-entity id="hotspots-s4" visible="false">
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.5 2.1 -3.0"
-                material="shader: flat; color: #A5D6A7"
-                hotspot-panel="img: #s4_h1; side: right; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.4 1.55 -2.75"
-                material="shader: flat; color: #A5D6A7"
-                hotspot-panel="img: #s4_h2; side: left; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.9 1.35 -2.95"
-                material="shader: flat; color: #A5D6A7"
-                hotspot-panel="img: #s4_h3; side: right; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.55 1.0 -3.1"
-                material="shader: flat; color: #A5D6A7"
-                hotspot-panel="img: #s4_h4; side: left; distance: 0.65"></a-sphere>
-
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.1 0.7 -2.6"
-                material="shader: flat; color: #A5D6A7"
-                hotspot-panel="img: #s4_h5; side: up; distance: 0.70"></a-sphere>
-    </a-entity>
-
-    <!-- ✅ 凝視點選（延長到 3 秒） -->
+    <!-- Gaze cursor 3s -->
     <a-entity id="rig">
       <a-camera position="0 1.6 0" wasd-controls-enabled="false">
-        <a-cursor
-          fuse="true"
-          fuse-timeout="3000"
+        <a-cursor fuse="true" fuse-timeout="3000"
           raycaster="objects: .clickable"
           material="color: white; shader: flat"
           geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.017"
@@ -448,12 +849,8 @@
     </a-entity>
 
     <script>
-      // 初始化場景狀態：一開始在 s1
-      window.__CURRENT_SCENE__ = 's1';
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setHudText(`${saved}｜${SCENES.s1.label}`);
-      updateMenus('s1');       // ✅ 確保互斥狀態從一開始就正確
-      setHotspotsEnabled(true); // ✅ 初始可點
+      // 初始 HUD（若尚未輸入名字，會在 Gate 後才 goTopicMenu）
+      setHud('Topic 選單');
     </script>
   </a-scene>
 </body>
