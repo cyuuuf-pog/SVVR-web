@@ -50,30 +50,20 @@
 
   <script>
     /**
-     * 依照 A-Frame 360 gallery 的概念：同一個 a-scene，用 a-sky 換 src 切換場景。 :contentReference[oaicite:1]{index=1}
-     * 我們自己做：
-     *  - scene-switch：換 sky + 淡入淡出 + 切換知識點群組
-     *  - clickable：用 cursor + raycaster 對 .clickable 觸發 click（你原本凝視點選的方式）
+     * 單一 <a-scene>，以 <a-sky> 換 src 切換場景（iOS 較穩）。
+     * 需求：
+     *  - scene1 = 主介面：顯示所有場景切換 + 進度按鈕
+     *  - scene2/3/... = 內容場景：只顯示「回主介面」按鈕 + 各自知識點
+     *  - 凝視點選：沿用 cursor fuse + raycaster: .clickable
      */
 
     const STORAGE_KEY = 'svvr_student_name_v1';
 
     const SCENES = {
-      s1: {
-        panoAsset: '#pano1',
-        hotspotGroup: '#hotspots-s1',
-        label: '場景 1'
-      },
-      s2: {
-        panoAsset: '#pano2',
-        hotspotGroup: '#hotspots-s2',
-        label: '場景 2'
-      },
-      s3: {
-        panoAsset: '#pano3',
-        hotspotGroup: '#hotspots-s3',
-        label: '場景 3'
-      }
+      s1: { panoAsset: '#pano1', hotspotGroup: '#hotspots-s1', label: '主介面', isHub: true },
+      s2: { panoAsset: '#pano2', hotspotGroup: '#hotspots-s2', label: '場景 2', isHub: false },
+      s3: { panoAsset: '#pano3', hotspotGroup: '#hotspots-s3', label: '場景 3', isHub: false }
+      // s4... 以同樣格式擴充
     };
 
     function setVisible(sel, visible) {
@@ -84,6 +74,12 @@
     function setHudText(text) {
       const hud = document.querySelector('#hudText');
       if (hud) hud.setAttribute('text', 'value', text);
+    }
+
+    function updateMenus(sceneId) {
+      const isHub = !!SCENES[sceneId]?.isHub;
+      setVisible('#hubMenu', isHub);      // s1 顯示
+      setVisible('#backMenu', !isHub);    // s2+ 顯示
     }
 
     AFRAME.registerComponent('scene-switch', {
@@ -110,21 +106,26 @@
         fade.setAttribute('visible', true);
         fade.emit('fadeOut');
 
-        // 2) 等淡出完成後換圖 + 切換知識點群組，再淡入
+        // 2) 等淡出完成後換圖 + 切換知識點群組 + 切換選單，再淡入
         setTimeout(() => {
-          // 換 sky（核心切換方式）:contentReference[oaicite:2]{index=2}
+          // 換 sky（核心切換方式）
           sky.setAttribute('material', 'src', target.panoAsset);
 
-          // 切換每個場景的知識點群組
+          // 切換知識點群組
           setVisible(SCENES[current].hotspotGroup, false);
           setVisible(target.hotspotGroup, true);
 
+          // 更新目前場景
           window.__CURRENT_SCENE__ = targetId;
 
           // HUD 顯示（含名字）
           const name = localStorage.getItem(STORAGE_KEY) || '未命名';
           setHudText(`${name}｜${target.label}`);
 
+          // 切換主介面/返回按鈕
+          updateMenus(targetId);
+
+          // 淡入
           fade.emit('fadeIn');
           setTimeout(() => fade.setAttribute('visible', false), 260);
         }, 220);
@@ -160,6 +161,10 @@
 
       btn.addEventListener('click', start);
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+
+      // 進度按鈕（先留測試；你之後可改為開啟進度面板）
+      const pb = document.querySelector('#progressBtn');
+      if (pb) pb.addEventListener('click', () => console.log('open progress'));
     });
   </script>
 </head>
@@ -188,13 +193,13 @@
       <img id="pano2" src="pano/scene2.jpg" crossorigin="anonymous">
       <img id="pano3" src="pano/scene3.jpg" crossorigin="anonymous">
 
-      <!-- 縮圖（可選，用於「切換場景」面板） -->
+      <!-- 縮圖（可選，用於「主介面」場景切換按鈕） -->
       <img id="thumb1" src="thumb/scene1.jpg" crossorigin="anonymous">
       <img id="thumb2" src="thumb/scene2.jpg" crossorigin="anonymous">
       <img id="thumb3" src="thumb/scene3.jpg" crossorigin="anonymous">
     </a-assets>
 
-    <!-- 360 背景（切換就是改 src）:contentReference[oaicite:3]{index=3} -->
+    <!-- 360 背景（切換就是改 src） -->
     <a-sky id="sky" radius="10" src="#pano1"></a-sky>
 
     <!-- 淡入淡出遮罩 -->
@@ -215,25 +220,38 @@
       </a-entity>
     </a-entity>
 
-    <!-- 場景切換面板（你可以放主選單/進度按鈕也放這裡） -->
-    <a-entity id="sceneMenu" position="0 1.45 -2.2" rotation="0 0 0">
-      <a-plane class="clickable" scene-switch="to: s1"
-        position="-1.1 0 0" width="0.8" height="0.45"
-        material="shader: flat; src: #thumb1; opacity: 0.95">
-      </a-plane>
+    <!-- ✅ 主介面（s1）才顯示：所有場景切換 + 進度 -->
+    <a-entity id="hubMenu" position="0 1.45 -2.2" rotation="0 0 0" visible="true">
+      <!-- 你可以自行調整排版/數量：要切到哪幾個場景 -->
       <a-plane class="clickable" scene-switch="to: s2"
-        position="0 0 0" width="0.8" height="0.45"
-        material="shader: flat; src: #thumb2; opacity: 0.95">
-      </a-plane>
+        position="-1.1 0 0" width="0.8" height="0.45"
+        material="shader: flat; src: #thumb2; opacity: 0.95"></a-plane>
+
       <a-plane class="clickable" scene-switch="to: s3"
+        position="0 0 0" width="0.8" height="0.45"
+        material="shader: flat; src: #thumb3; opacity: 0.95"></a-plane>
+
+      <a-plane class="clickable" id="progressBtn"
         position="1.1 0 0" width="0.8" height="0.45"
-        material="shader: flat; src: #thumb3; opacity: 0.95">
+        material="shader: flat; color: #111; opacity: 0.95">
+        <a-entity text="value: 進度; align: center; width: 2; color: #fff"
+          position="0 0 0.01"></a-entity>
+      </a-plane>
+    </a-entity>
+
+    <!-- ✅ 內容場景（s2+）才顯示：只留「回主介面」 -->
+    <a-entity id="backMenu" position="0 1.45 -2.2" rotation="0 0 0" visible="false">
+      <a-plane class="clickable" scene-switch="to: s1"
+        width="0.95" height="0.45"
+        material="shader: flat; color: #111; opacity: 0.95">
+        <a-entity text="value: 回主介面; align: center; width: 3; color: #fff"
+          position="0 0 0.01"></a-entity>
       </a-plane>
     </a-entity>
 
     <!-- 每個場景的知識點（只切 visible，不重建 scene） -->
     <a-entity id="hotspots-s1" visible="true">
-      <!-- 這裡放場景1的知識點按鈕（用 .clickable + 你原本的事件/開啟面板邏輯） -->
+      <!-- 主介面通常不放知識點；你要放也可以 -->
       <a-sphere class="clickable" position="2 1.4 -3" radius="0.08"
         material="color: #FFD54F; shader: flat"
         onclick="console.log('S1 hotspot A')">
@@ -258,7 +276,7 @@
       </a-sphere>
     </a-entity>
 
-    <!-- 你的「原先凝視點選」：camera + cursor + raycaster 對 .clickable -->
+    <!-- 你的「凝視點選」：camera + cursor + raycaster 對 .clickable -->
     <a-entity id="rig">
       <a-camera position="0 1.6 0" wasd-controls-enabled="false">
         <a-cursor
@@ -276,10 +294,12 @@
     <script>
       // 初始化目前場景 & HUD（如果已經有名字就直接顯示）
       window.__CURRENT_SCENE__ = 's1';
-      const saved = localStorage.getItem('svvr_student_name_v1');
+      const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         setHudText(`${saved}｜${SCENES.s1.label}`);
       }
+      // ✅ 一開始在主介面
+      updateMenus('s1');
     </script>
   </a-scene>
 </body>
