@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>SVVR 360 Gallery (Final)</title>
+  <title>SVVR 360 Gallery (Final + Hotspots + 3s Gaze)</title>
   <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
 
   <style>
@@ -53,6 +53,9 @@
     // ====== 基本設定 ======
     const STORAGE_KEY = 'svvr_student_name_v1';
 
+    // 3 秒凝視觸發
+    const GAZE_TIMEOUT_MS = 3000;
+
     // 依你的專案擴充場景：s1=主介面(Hub)、其餘=內容場景
     const SCENES = {
       s1: { panoAsset:'#pano1', hotspotGroup:'#hotspots-s1', label:'植物分類導覽', isHub:true  },
@@ -93,6 +96,85 @@
       setVisible('#sceneMenu', false);
     }
 
+    // ====== 避免互相干擾：面板開啟時，暫停其他按鈕點擊 ======
+    function setHotspotsEnabled(enabled){
+      // 只針對 hotspots（我們用 data-hotspot="true" 標記）
+      document.querySelectorAll('[data-hotspot="true"]').forEach(el => {
+        if (enabled) el.classList.add('clickable');
+        else el.classList.remove('clickable');
+      });
+
+      // Hub / Back menu 的按鈕也一起管控（面板開啟時不讓誤觸）
+      ['#hubMenu', '#backMenu'].forEach(sel => {
+        const menu = qs(sel);
+        if (!menu) return;
+        menu.querySelectorAll('[data-ui="true"]').forEach(btn => {
+          if (enabled) btn.classList.add('clickable');
+          else btn.classList.remove('clickable');
+        });
+      });
+
+      // 關閉按鈕永遠可點（由 HTML 保持 clickable）
+      qs('#infoCloseBtn')?.classList.add('clickable');
+    }
+
+    function faceCameraYaw(panelEl){
+      const cam = qs('[camera]');
+      if (!panelEl || !cam || !window.THREE) return;
+      const panelPos = new THREE.Vector3();
+      const camPos = new THREE.Vector3();
+      panelEl.object3D.getWorldPosition(panelPos);
+      cam.object3D.getWorldPosition(camPos);
+      const dx = camPos.x - panelPos.x;
+      const dz = camPos.z - panelPos.z;
+      const yaw = Math.atan2(dx, dz) * (180 / Math.PI);
+      panelEl.setAttribute('rotation', `0 ${yaw} 0`);
+    }
+
+    // ====== Hotspot -> 在旁邊顯示圖片面板 ======
+    AFRAME.registerComponent('hotspot-panel', {
+      schema: {
+        img: { type: 'selector' },      // e.g., img: #s2_h1
+        side: { default: 'right' },     // right / left / up / down
+        distance: { default: 0.65 }     // 面板離 hotspot 的距離
+      },
+      init: function(){
+        this.onClick = () => {
+          const panel = qs('#infoPanel');
+          const imgPlane = qs('#infoImage');
+          if (!panel || !imgPlane || !window.THREE) return;
+
+          // 1) 換圖
+          const imgEl = this.data.img;
+          if (imgEl) imgPlane.setAttribute('material', 'src', `#${imgEl.id}`);
+
+          // 2) 面板位置：hotspot 世界座標 + 偏移
+          const p = new THREE.Vector3();
+          this.el.object3D.getWorldPosition(p);
+
+          const d = this.data.distance;
+          let offset = new THREE.Vector3(d, 0, 0);
+          if (this.data.side === 'left') offset.set(-d, 0, 0);
+          if (this.data.side === 'up') offset.set(0, d * 0.6, 0);
+          if (this.data.side === 'down') offset.set(0, -d * 0.6, 0);
+
+          p.add(offset);
+          panel.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
+          panel.setAttribute('visible', true);
+
+          // 3) 面板面向相機（只旋轉 Y 軸）
+          faceCameraYaw(panel);
+
+          // 4) 避免干擾：面板開啟時，關閉其他 hotspot / UI 的點擊
+          setHotspotsEnabled(false);
+        };
+        this.el.addEventListener('click', this.onClick);
+      },
+      remove: function(){
+        this.el.removeEventListener('click', this.onClick);
+      }
+    });
+
     // ====== 切換場景 Component ======
     AFRAME.registerComponent('scene-switch', {
       schema: { to: {type:'string'} },
@@ -127,6 +209,10 @@
           setVisible(SCENES[current].hotspotGroup, false);
           setVisible(target.hotspotGroup, true);
 
+          // 切換時關閉面板、恢復點擊
+          setVisible('#infoPanel', false);
+          setHotspotsEnabled(true);
+
           // 記錄當前場景
           window.__CURRENT_SCENE__ = targetId;
 
@@ -144,7 +230,7 @@
       }
     });
 
-    // ====== 名字 Gate ======
+    // ====== 名字 Gate + 關閉按鈕 ======
     window.addEventListener('DOMContentLoaded', () => {
       const gate  = document.getElementById('nameGate');
       const input = document.getElementById('studentNameInput');
@@ -168,6 +254,14 @@
 
       btn?.addEventListener('click', start);
       input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+
+      // 關閉面板
+      const closeBtn = qs('#infoCloseBtn');
+      const panel = qs('#infoPanel');
+      closeBtn?.addEventListener('click', () => {
+        panel?.setAttribute('visible', false);
+        setHotspotsEnabled(true);
+      });
     });
   </script>
 </head>
@@ -177,7 +271,7 @@
   <div id="nameGate" style="display:none;">
     <div id="nameCard">
       <h2>請輸入姓名</h2>
-      <p>用於學習紀錄與介面顯示。完成後即可開始操作（凝視停留即可點選）。</p>
+      <p>用於學習紀錄與介面顯示。完成後即可開始操作（凝視停留 <b>3 秒</b> 即可點選）。</p>
       <div id="nameRow">
         <input id="studentNameInput" placeholder="輸入名字..." autocomplete="name" />
         <button id="startBtn">開始體驗</button>
@@ -193,6 +287,25 @@
       <img id="pano2" src="pano/scene2.jpg" crossorigin="anonymous">
       <img id="pano3" src="pano/scene3.jpg" crossorigin="anonymous">
       <img id="pano4" src="pano/scene4.jpg" crossorigin="anonymous">
+
+      <!-- 15 張資訊圖片（依你的檔名替換） -->
+      <img id="s2_h1" src="info/s2_h1.png" crossorigin="anonymous">
+      <img id="s2_h2" src="info/s2_h2.png" crossorigin="anonymous">
+      <img id="s2_h3" src="info/s2_h3.png" crossorigin="anonymous">
+      <img id="s2_h4" src="info/s2_h4.png" crossorigin="anonymous">
+      <img id="s2_h5" src="info/s2_h5.png" crossorigin="anonymous">
+
+      <img id="s3_h1" src="info/s3_h1.png" crossorigin="anonymous">
+      <img id="s3_h2" src="info/s3_h2.png" crossorigin="anonymous">
+      <img id="s3_h3" src="info/s3_h3.png" crossorigin="anonymous">
+      <img id="s3_h4" src="info/s3_h4.png" crossorigin="anonymous">
+      <img id="s3_h5" src="info/s3_h5.png" crossorigin="anonymous">
+
+      <img id="s4_h1" src="info/s4_h1.png" crossorigin="anonymous">
+      <img id="s4_h2" src="info/s4_h2.png" crossorigin="anonymous">
+      <img id="s4_h3" src="info/s4_h3.png" crossorigin="anonymous">
+      <img id="s4_h4" src="info/s4_h4.png" crossorigin="anonymous">
+      <img id="s4_h5" src="info/s4_h5.png" crossorigin="anonymous">
     </a-assets>
 
     <!-- 360 背景 -->
@@ -216,48 +329,120 @@
       </a-entity>
     </a-entity>
 
+    <!-- ✅ 圖片面板：顯示在 hotspot 旁邊（不跟相機走） -->
+    <a-entity id="infoPanel" visible="false">
+      <a-plane id="infoBg" width="1.2" height="0.8"
+               material="shader: flat; color: #111; opacity: 0.92"></a-plane>
+
+      <a-plane id="infoImage" width="1.08" height="0.62" position="0 0 0.01"
+               material="shader: flat; transparent: true"></a-plane>
+
+      <a-plane id="infoCloseBtn" class="clickable" width="0.24" height="0.14"
+               position="0.49 0.33 0.02"
+               material="shader: flat; color: #333; opacity: 0.98">
+        <a-entity text="value: 關閉; align: center; width: 2; color: #fff"
+                  position="0 0 0.01"></a-entity>
+      </a-plane>
+    </a-entity>
+
     <!-- ✅ Hub 主介面：只在 s1 顯示（切換所有場景 + 進度按鈕） -->
     <a-entity id="hubMenu" position="0 1.3 -2" visible="true">
-      <a-box class="clickable" scene-switch="to: s2" position="-1 0 0" scale="0.5 0.5 0.1" color="tomato"></a-box>
-      <a-box class="clickable" scene-switch="to: s3" position="0 0 0"  scale="0.5 0.5 0.1" color="skyblue"></a-box>
-      <a-box class="clickable" scene-switch="to: s4" position="1 0 0"  scale="0.5 0.5 0.1" color="yellowgreen"></a-box>
+      <a-box data-ui="true" class="clickable" scene-switch="to: s2" position="-1 0 0" scale="0.5 0.5 0.1" color="tomato"></a-box>
+      <a-box data-ui="true" class="clickable" scene-switch="to: s3" position="0 0 0"  scale="0.5 0.5 0.1" color="skyblue"></a-box>
+      <a-box data-ui="true" class="clickable" scene-switch="to: s4" position="1 0 0"  scale="0.5 0.5 0.1" color="yellowgreen"></a-box>
 
-      <!-- 進度按鈕（先保留占位，之後可接你的進度面板） -->
-      <a-box class="clickable" id="progressBtn" position="0 -0.7 0" scale="0.7 0.25 0.1" color="#222"></a-box>
+      <a-box data-ui="true" class="clickable" id="progressBtn" position="0 -0.7 0" scale="0.7 0.25 0.1" color="#222"></a-box>
       <a-entity text="value: 進度; align: center; width: 2; color: #fff"
         position="0 -0.7 0.06"></a-entity>
     </a-entity>
 
     <!-- ✅ 內容場景：只在 s2/s3/s4 顯示（只留回主介面） -->
     <a-entity id="backMenu" position="0 1.3 -2" visible="false">
-      <a-box class="clickable" scene-switch="to: s1" position="0 0 0" scale="0.7 0.25 0.1" color="#444"></a-box>
+      <a-box data-ui="true" class="clickable" scene-switch="to: s1" position="0 0 0" scale="0.7 0.25 0.1" color="#444"></a-box>
       <a-entity text="value: 回主介面; align: center; width: 3; color: #fff"
         position="0 0 0.06"></a-entity>
     </a-entity>
 
-    <!-- 知識點群組（每個場景一包，切 visible） -->
+    <!-- ====== Hotspots（每個場景 5 個，位置分散：上/中/下） ====== -->
     <a-entity id="hotspots-s1" visible="true"></a-entity>
 
     <a-entity id="hotspots-s2" visible="false">
-      <!-- 示範：把你的知識點按鈕放在這裡（記得加 class=clickable 才能凝視點選） -->
-      <a-sphere class="clickable" radius="0.12" position="0 1.6 -2" color="red"
-        onclick="console.log('S2 hotspot')"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.6 2.0 -3.0"
+                material="shader: flat; color: #FFD54F"
+                hotspot-panel="img: #s2_h1; side: right; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.6 1.6 -2.8"
+                material="shader: flat; color: #FFD54F"
+                hotspot-panel="img: #s2_h2; side: left; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.8 1.3 -2.9"
+                material="shader: flat; color: #FFD54F"
+                hotspot-panel="img: #s2_h3; side: right; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.6 1.1 -3.1"
+                material="shader: flat; color: #FFD54F"
+                hotspot-panel="img: #s2_h4; side: left; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.0 0.8 -2.6"
+                material="shader: flat; color: #FFD54F"
+                hotspot-panel="img: #s2_h5; side: up; distance: 0.70"></a-sphere>
     </a-entity>
 
-    <a-entity id="hotspots-s3" visible="false"></a-entity>
-    <a-entity id="hotspots-s4" visible="false"></a-entity>
+    <a-entity id="hotspots-s3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.4 2.05 -2.9"
+                material="shader: flat; color: #4FC3F7"
+                hotspot-panel="img: #s3_h1; side: right; distance: 0.65"></a-sphere>
 
-    <!-- ✅ 凝視點選（沿用 fuse + raycaster: .clickable） -->
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.2 1.7 -2.7"
+                material="shader: flat; color: #4FC3F7"
+                hotspot-panel="img: #s3_h2; side: left; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.2 1.45 -3.0"
+                material="shader: flat; color: #4FC3F7"
+                hotspot-panel="img: #s3_h3; side: right; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.4 1.05 -2.5"
+                material="shader: flat; color: #4FC3F7"
+                hotspot-panel="img: #s3_h4; side: up; distance: 0.70"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.0 0.75 -2.8"
+                material="shader: flat; color: #4FC3F7"
+                hotspot-panel="img: #s3_h5; side: down; distance: 0.70"></a-sphere>
+    </a-entity>
+
+    <a-entity id="hotspots-s4" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.5 2.1 -3.0"
+                material="shader: flat; color: #A5D6A7"
+                hotspot-panel="img: #s4_h1; side: right; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.4 1.55 -2.75"
+                material="shader: flat; color: #A5D6A7"
+                hotspot-panel="img: #s4_h2; side: left; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.9 1.35 -2.95"
+                material="shader: flat; color: #A5D6A7"
+                hotspot-panel="img: #s4_h3; side: right; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.55 1.0 -3.1"
+                material="shader: flat; color: #A5D6A7"
+                hotspot-panel="img: #s4_h4; side: left; distance: 0.65"></a-sphere>
+
+      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.1 0.7 -2.6"
+                material="shader: flat; color: #A5D6A7"
+                hotspot-panel="img: #s4_h5; side: up; distance: 0.70"></a-sphere>
+    </a-entity>
+
+    <!-- ✅ 凝視點選（延長到 3 秒） -->
     <a-entity id="rig">
       <a-camera position="0 1.6 0" wasd-controls-enabled="false">
         <a-cursor
           fuse="true"
-          fuse-timeout="650"
+          fuse-timeout="3000"
           raycaster="objects: .clickable"
           material="color: white; shader: flat"
           geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.017"
-          animation__fusing="property: geometry.radiusInner; from: 0.01; to: 0.001; dur: 650; startEvents: fusing"
-          animation__reset="property: geometry.radiusInner; to: 0.01; dur: 100; startEvents: mouseleave">
+          animation__fusing="property: geometry.radiusInner; from: 0.01; to: 0.001; dur: 3000; startEvents: fusing"
+          animation__reset="property: geometry.radiusInner; to: 0.01; dur: 120; startEvents: mouseleave">
         </a-cursor>
       </a-camera>
     </a-entity>
@@ -267,7 +452,8 @@
       window.__CURRENT_SCENE__ = 's1';
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) setHudText(`${saved}｜${SCENES.s1.label}`);
-      updateMenus('s1'); // ✅ 確保互斥狀態從一開始就正確
+      updateMenus('s1');       // ✅ 確保互斥狀態從一開始就正確
+      setHotspotsEnabled(true); // ✅ 初始可點
     </script>
   </a-scene>
 </body>
