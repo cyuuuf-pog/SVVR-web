@@ -56,7 +56,7 @@
     const STORAGE_KEY_NAME  = 'svvr_student_name_v1';
     const STORAGE_KEY_STATE = 'svvr_state_v1';
 
-    const GAZE_TIMEOUT_MS = 2000; // 凝視點選 3 秒
+    const GAZE_TIMEOUT_MS = 3000; // 凝視點選 3 秒
 
     // 三層架構：TopicMenu → Hub(topic) → Lesson(topic, lesson)
     const TOPICS = {
@@ -192,6 +192,7 @@
     }
 
     function goTopicMenu(){
+      hideAllHotspotGroups();
       state.current = { level: "topicMenu", topicId: null, lessonId: null };
       saveState();
       closeInfoPanel();
@@ -301,6 +302,7 @@
     }
 
     function goHub(topicId){
+      hideAllHotspotGroups();
       const topic = TOPICS[topicId];
       if (!topic) return;
 
@@ -424,6 +426,7 @@
     });
 
     function startQuiz(topicId){
+      hideAllHotspotGroups();
       if (!isTopicComplete(topicId)) return;
       if (state.quiz[topicId]?.done) return;
 
