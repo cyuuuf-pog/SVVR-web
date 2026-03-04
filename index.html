@@ -1,212 +1,286 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <title>SVVR 360 Gallery (Gaze + Name)</title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>SVVR 360 Gallery (Single Scene Switch)</title>
+  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
 
-    <!-- A-Frame -->
-    <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+  <style>
+    /* 開頭輸入名字的遮罩 */
+    #nameGate {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999; padding: 24px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans TC", sans-serif;
+    }
+    #nameCard {
+      width: min(520px, 100%);
+      background: rgba(20,20,20,0.92);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      color: #fff;
+    }
+    #nameCard h2 { margin: 0 0 10px; font-size: 18px; }
+    #nameCard p { margin: 0 0 12px; font-size: 14px; opacity: .9; line-height: 1.4; }
+    #nameRow { display:flex; gap: 10px; }
+    #studentNameInput {
+      flex: 1;
+      font-size: 16px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      outline: none;
+    }
+    #startBtn {
+      font-size: 16px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 0;
+      background: #2f7cff;
+      color: #fff;
+      cursor: pointer;
+    }
+    #hint { margin-top: 10px; font-size: 12px; opacity: .8; }
+  </style>
 
-    <!-- Community components used by the official 360 gallery guide -->
-    <script src="https://unpkg.com/aframe-template-component@3.2.5/dist/aframe-template-component.min.js"></script>
-    <script src="https://unpkg.com/aframe-layout-component@5.3.0/dist/aframe-layout-component.min.js"></script>
-    <script src="https://unpkg.com/aframe-event-set-component@5.0.0/dist/aframe-event-set-component.min.js"></script>
-    <script src="https://unpkg.com/aframe-proxy-event-component@2.2.1/dist/aframe-proxy-event-component.min.js"></script>
+  <script>
+    /**
+     * 依照 A-Frame 360 gallery 的概念：同一個 a-scene，用 a-sky 換 src 切換場景。 :contentReference[oaicite:1]{index=1}
+     * 我們自己做：
+     *  - scene-switch：換 sky + 淡入淡出 + 切換知識點群組
+     *  - clickable：用 cursor + raycaster 對 .clickable 觸發 click（你原本凝視點選的方式）
+     */
 
-    <style>
-      /* Name overlay */
-      #nameOverlay {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0,0,0,0.7);
-        z-index: 9999;
-        padding: 16px;
+    const STORAGE_KEY = 'svvr_student_name_v1';
+
+    const SCENES = {
+      s1: {
+        panoAsset: '#pano1',
+        hotspotGroup: '#hotspots-s1',
+        label: '場景 1'
+      },
+      s2: {
+        panoAsset: '#pano2',
+        hotspotGroup: '#hotspots-s2',
+        label: '場景 2'
+      },
+      s3: {
+        panoAsset: '#pano3',
+        hotspotGroup: '#hotspots-s3',
+        label: '場景 3'
       }
-      #nameCard {
-        width: min(420px, 100%);
-        background: #111;
-        border: 1px solid rgba(255,255,255,0.15);
-        border-radius: 14px;
-        padding: 18px;
-        color: #fff;
-        font-family: system-ui, -apple-system, "PingFang TC", "Noto Sans TC", Arial;
-      }
-      #nameCard h2 { margin: 0 0 10px; font-size: 18px; }
-      #nameCard p { margin: 0 0 12px; opacity: 0.85; font-size: 14px; line-height: 1.4; }
-      #nameInput {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid rgba(255,255,255,0.2);
-        background: #000;
-        color: #fff;
-        font-size: 16px;
-        outline: none;
-      }
-      #nameActions { display: flex; gap: 10px; margin-top: 12px; }
-      .btn {
-        flex: 1;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid rgba(255,255,255,0.2);
-        background: #1b1b1b;
-        color: #fff;
-        font-size: 15px;
-        cursor: pointer;
-      }
-      .btnPrimary { background: #2a2a2a; border-color: rgba(255,255,255,0.35); }
-      .hint { margin-top: 10px; font-size: 12px; opacity: 0.75; }
-    </style>
+    };
 
-    <!-- Link template (same idea as the official guide: use ${thumb} and ${src}) -->
-    <script id="link" type="text/html">
-      <a-entity class="link clickable"
-        geometry="primitive: plane; height: 0.9; width: 0.9"
-        material="shader: flat; src: ${thumb}"
-        sound="on: click; src: #click-sound"
-        event-set__mouseenter="scale: 1.12 1.12 1"
-        event-set__mouseleave="scale: 1 1 1"
-        proxy-event="event: click; to: #image-360; as: fade"
-        event-set__click="_target: #image-360; _delay: 300; material.src: ${src}">
-      </a-entity>
-    </script>
+    function setVisible(sel, visible) {
+      const el = document.querySelector(sel);
+      if (el) el.setAttribute('visible', visible);
+    }
 
-    <script>
-      // --- Name logic: persist so even if iOS reloads, you won't ask again ---
-      const STORAGE_KEY = "svvr_student_name";
+    function setHudText(text) {
+      const hud = document.querySelector('#hudText');
+      if (hud) hud.setAttribute('text', 'value', text);
+    }
 
-      function getSavedName() {
-        try { return localStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+    AFRAME.registerComponent('scene-switch', {
+      schema: { to: {type: 'string'} },
+      init: function () {
+        this.onClick = this.onClick.bind(this);
+        this.el.addEventListener('click', this.onClick);
+      },
+      remove: function () {
+        this.el.removeEventListener('click', this.onClick);
+      },
+      onClick: function () {
+        const targetId = this.data.to;
+        const target = SCENES[targetId];
+        if (!target) return;
+
+        const sky = document.querySelector('#sky');
+        const fade = document.querySelector('#fadePlane');
+
+        const current = window.__CURRENT_SCENE__ || 's1';
+        if (current === targetId) return;
+
+        // 1) 淡出
+        fade.setAttribute('visible', true);
+        fade.emit('fadeOut');
+
+        // 2) 等淡出完成後換圖 + 切換知識點群組，再淡入
+        setTimeout(() => {
+          // 換 sky（核心切換方式）:contentReference[oaicite:2]{index=2}
+          sky.setAttribute('material', 'src', target.panoAsset);
+
+          // 切換每個場景的知識點群組
+          setVisible(SCENES[current].hotspotGroup, false);
+          setVisible(target.hotspotGroup, true);
+
+          window.__CURRENT_SCENE__ = targetId;
+
+          // HUD 顯示（含名字）
+          const name = localStorage.getItem(STORAGE_KEY) || '未命名';
+          setHudText(`${name}｜${target.label}`);
+
+          fade.emit('fadeIn');
+          setTimeout(() => fade.setAttribute('visible', false), 260);
+        }, 220);
       }
-      function saveName(name) {
-        try { localStorage.setItem(STORAGE_KEY, name); } catch {}
+    });
+
+    // 頁面載入：處理名字 gate
+    window.addEventListener('DOMContentLoaded', () => {
+      const gate = document.getElementById('nameGate');
+      const input = document.getElementById('studentNameInput');
+      const btn = document.getElementById('startBtn');
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        gate.style.display = 'none';
+      } else {
+        gate.style.display = 'flex';
+        setTimeout(() => input.focus(), 50);
       }
 
-      function setHudName(name) {
-        const hud = document.querySelector("#hudName");
-        if (hud) hud.setAttribute("text", "value", `學生：${name}`);
-      }
-
-      window.addEventListener("DOMContentLoaded", () => {
-        const overlay = document.getElementById("nameOverlay");
-        const input = document.getElementById("nameInput");
-        const btnStart = document.getElementById("btnStart");
-        const btnReset = document.getElementById("btnReset");
-
-        const saved = getSavedName();
-        if (saved) {
-          overlay.style.display = "none";
-          setHudName(saved);
-        } else {
-          overlay.style.display = "flex";
+      function start() {
+        const name = (input.value || '').trim();
+        if (!name) {
           input.focus();
+          return;
         }
+        localStorage.setItem(STORAGE_KEY, name);
+        gate.style.display = 'none';
 
-        btnStart.addEventListener("click", () => {
-          const name = (input.value || "").trim();
-          if (!name) { input.focus(); return; }
-          saveName(name);
-          overlay.style.display = "none";
-          setHudName(name);
+        // 初次 HUD
+        setHudText(`${name}｜${SCENES[window.__CURRENT_SCENE__ || 's1'].label}`);
+      }
 
-          // iOS sometimes requires a user gesture before audio can play;
-          // clicking Start counts as a gesture so click sound will work better.
-        });
+      btn.addEventListener('click', start);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+    });
+  </script>
+</head>
 
-        btnReset.addEventListener("click", () => {
-          try { localStorage.removeItem(STORAGE_KEY); } catch {}
-          input.value = "";
-          overlay.style.display = "flex";
-          input.focus();
-          setHudName("（未輸入）");
-        });
-      });
-    </script>
-  </head>
-
-  <body style="margin:0;">
-    <!-- Name overlay -->
-    <div id="nameOverlay" style="display:none;">
-      <div id="nameCard">
-        <h2>請先輸入你的名字</h2>
-        <p>完成後就可以用「凝視」點選縮圖切換場景。</p>
-        <input id="nameInput" type="text" inputmode="text" placeholder="例如：王小明" />
-        <div id="nameActions">
-          <button class="btn btnPrimary" id="btnStart">開始</button>
-          <button class="btn" id="btnReset">清除已儲存名字</button>
-        </div>
-        <div class="hint">※ 名字會儲存在瀏覽器（localStorage），iOS 就算偶發重整也不會一直要你重輸。</div>
+<body style="margin:0; background:#000;">
+  <!-- 開頭輸入名字 -->
+  <div id="nameGate" style="display:none;">
+    <div id="nameCard">
+      <h2>請輸入你的名字</h2>
+      <p>用於學習紀錄與介面顯示。完成後即可開始操作（凝視停留即可點選）。</p>
+      <div id="nameRow">
+        <input id="studentNameInput" placeholder="例如：王小明" autocomplete="name" />
+        <button id="startBtn">開始</button>
       </div>
+      <div id="hint">提示：若你想讓每次都重新輸入，可改用 sessionStorage；目前用 localStorage 以避免 iOS 意外重整又要重填。</div>
     </div>
+  </div>
 
-    <a-scene>
-      <a-assets>
-        <audio id="click-sound" src="https://cdn.aframe.io/360-image-gallery-boilerplate/audio/click.ogg"></audio>
+  <a-scene
+    renderer="colorManagement: true; physicallyCorrectLights: false"
+    vr-mode-ui="enabled: true"
+  >
+    <a-assets>
+      <!-- 你的 360 全景（請換成你的檔案） -->
+      <img id="pano1" src="pano/scene1.jpg" crossorigin="anonymous">
+      <img id="pano2" src="pano/scene2.jpg" crossorigin="anonymous">
+      <img id="pano3" src="pano/scene3.jpg" crossorigin="anonymous">
 
-        <!-- Replace these 6 images with your own -->
-        <img id="scene1" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/city.jpg" crossorigin="anonymous">
-        <img id="scene1-thumb" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/thumb-city.jpg" crossorigin="anonymous">
+      <!-- 縮圖（可選，用於「切換場景」面板） -->
+      <img id="thumb1" src="thumb/scene1.jpg" crossorigin="anonymous">
+      <img id="thumb2" src="thumb/scene2.jpg" crossorigin="anonymous">
+      <img id="thumb3" src="thumb/scene3.jpg" crossorigin="anonymous">
+    </a-assets>
 
-        <img id="scene2" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/cubes.jpg" crossorigin="anonymous">
-        <img id="scene2-thumb" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/thumb-cubes.jpg" crossorigin="anonymous">
+    <!-- 360 背景（切換就是改 src）:contentReference[oaicite:3]{index=3} -->
+    <a-sky id="sky" radius="10" src="#pano1"></a-sky>
 
-        <img id="scene3" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/sechelt.jpg" crossorigin="anonymous">
-        <img id="scene3-thumb" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/thumb-sechelt.jpg" crossorigin="anonymous">
-      </a-assets>
+    <!-- 淡入淡出遮罩 -->
+    <a-plane id="fadePlane"
+      position="0 1.6 -0.5"
+      width="2" height="2"
+      material="color: #000; opacity: 0; transparent: true; shader: flat"
+      visible="false"
+      animation__out="property: material.opacity; to: 1; dur: 200; startEvents: fadeOut; easing: easeInQuad"
+      animation__in="property: material.opacity; to: 0; dur: 220; startEvents: fadeIn; easing: easeOutQuad">
+    </a-plane>
 
-      <!-- 360 background (same as guide, plus fade animations) -->
-      <a-sky
-        id="image-360"
-        radius="10"
-        src="#scene1"
-        animation__fade="property: components.material.material.color; type: color; from: #FFF; to: #000; dur: 300; startEvents: fade"
-        animation__fadeback="property: components.material.material.color; type: color; from: #000; to: #FFF; dur: 300; startEvents: animationcomplete__fade">
-      </a-sky>
-
-      <!-- Thumbnail panel group (layout around user) -->
-      <a-entity
-        id="thumbs"
-        layout="type: line; margin: 1.1"
-        position="-1.2 1.4 -2.6">
-        <a-entity template="src: #link" data-src="#scene1" data-thumb="#scene1-thumb"></a-entity>
-        <a-entity template="src: #link" data-src="#scene2" data-thumb="#scene2-thumb"></a-entity>
-        <a-entity template="src: #link" data-src="#scene3" data-thumb="#scene3-thumb"></a-entity>
+    <!-- 固定 HUD：顯示名字與場景 -->
+    <a-entity id="hud" position="0 1.75 -1.2">
+      <a-entity id="hudText"
+        text="value: ; align: center; width: 2; color: #FFFFFF; wrapCount: 24"
+        position="0 0 0">
       </a-entity>
+    </a-entity>
 
-      <!-- HUD text (fixed in front of camera) -->
-      <a-entity id="hud" position="0 1.85 -1.25">
-        <a-text id="hudName"
-          value="學生：（未輸入）"
-          align="center"
-          width="2.4"
-          color="#FFFFFF">
-        </a-text>
-        <a-text
-          value="凝視縮圖切換場景"
-          align="center"
-          width="2.4"
-          position="0 -0.18 0"
-          color="#DDDDDD">
-        </a-text>
-      </a-entity>
+    <!-- 場景切換面板（你可以放主選單/進度按鈕也放這裡） -->
+    <a-entity id="sceneMenu" position="0 1.45 -2.2" rotation="0 0 0">
+      <a-plane class="clickable" scene-switch="to: s1"
+        position="-1.1 0 0" width="0.8" height="0.45"
+        material="shader: flat; src: #thumb1; opacity: 0.95">
+      </a-plane>
+      <a-plane class="clickable" scene-switch="to: s2"
+        position="0 0 0" width="0.8" height="0.45"
+        material="shader: flat; src: #thumb2; opacity: 0.95">
+      </a-plane>
+      <a-plane class="clickable" scene-switch="to: s3"
+        position="1.1 0 0" width="0.8" height="0.45"
+        material="shader: flat; src: #thumb3; opacity: 0.95">
+      </a-plane>
+    </a-entity>
 
-      <!-- Camera + gaze cursor (fuse) -->
-      <a-camera>
+    <!-- 每個場景的知識點（只切 visible，不重建 scene） -->
+    <a-entity id="hotspots-s1" visible="true">
+      <!-- 這裡放場景1的知識點按鈕（用 .clickable + 你原本的事件/開啟面板邏輯） -->
+      <a-sphere class="clickable" position="2 1.4 -3" radius="0.08"
+        material="color: #FFD54F; shader: flat"
+        onclick="console.log('S1 hotspot A')">
+      </a-sphere>
+    </a-entity>
+
+    <a-entity id="hotspots-s2" visible="false">
+      <a-sphere class="clickable" position="-2 1.2 -3" radius="0.08"
+        material="color: #4FC3F7; shader: flat"
+        onclick="console.log('S2 hotspot A')">
+      </a-sphere>
+      <a-sphere class="clickable" position="0 1.0 -3" radius="0.08"
+        material="color: #4FC3F7; shader: flat"
+        onclick="console.log('S2 hotspot B')">
+      </a-sphere>
+    </a-entity>
+
+    <a-entity id="hotspots-s3" visible="false">
+      <a-sphere class="clickable" position="1 1.1 -3" radius="0.08"
+        material="color: #A5D6A7; shader: flat"
+        onclick="console.log('S3 hotspot A')">
+      </a-sphere>
+    </a-entity>
+
+    <!-- 你的「原先凝視點選」：camera + cursor + raycaster 對 .clickable -->
+    <a-entity id="rig">
+      <a-camera position="0 1.6 0" wasd-controls-enabled="false">
         <a-cursor
-          id="cursor"
           fuse="true"
-          fuse-timeout="900"
+          fuse-timeout="650"
           raycaster="objects: .clickable"
-          animation__click="property: scale; from: 0.1 0.1 0.1; to: 1 1 1; easing: easeInCubic; dur: 150; startEvents: click"
-          animation__clickreset="property: scale; to: 0.1 0.1 0.1; dur: 1; startEvents: animationcomplete__click"
-          animation__fusing="property: scale; from: 1 1 1; to: 0.1 0.1 0.1; easing: easeInCubic; dur: 900; startEvents: fusing">
+          material="color: white; shader: flat"
+          geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.017"
+          animation__fusing="property: geometry.radiusInner; from: 0.01; to: 0.001; dur: 650; startEvents: fusing"
+          animation__reset="property: geometry.radiusInner; to: 0.01; dur: 100; startEvents: mouseleave">
         </a-cursor>
       </a-camera>
-    </a-scene>
-  </body>
+    </a-entity>
+
+    <script>
+      // 初始化目前場景 & HUD（如果已經有名字就直接顯示）
+      window.__CURRENT_SCENE__ = 's1';
+      const saved = localStorage.getItem('svvr_student_name_v1');
+      if (saved) {
+        setHudText(`${saved}｜${SCENES.s1.label}`);
+      }
+    </script>
+  </a-scene>
+</body>
 </html>
