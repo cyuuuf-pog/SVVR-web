@@ -2,27 +2,597 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>SVVR Scene Switch (Toggle Sky)</title>
+  <title>SVVR (Gaze + World Panels + Progress Bar + Info + Logs)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 
+  <style>
+    .hud { position: fixed; z-index: 9999; font-family: system-ui, -apple-system, "Noto Sans TC", Arial; }
+    .btn { padding:10px 12px; border:0; border-radius:10px; background:#ffffffcc; cursor:pointer; backdrop-filter: blur(6px); font-size:14px; }
+    .btn:active { transform: translateY(1px); }
+  </style>
+
   <script>
-    AFRAME.registerComponent("switch-sky", {
+    const THREE = AFRAME.THREE;
+
+    // =========================
+    // 1) 場景資料（請改成你的檔名/路徑）
+    // =========================
+    const SCENES = {
+      s1: {
+        name: "1｜首頁（選單/進度）",
+        img: "school.jpg",
+        rotation: "0 -90 0",
+        navHotspots: [
+          { id:"nav_to_s2", pos:"-1.2 1.6 -3", to:"s2", label:"去場景2" },
+          { id:"nav_to_s3", pos:"1.2 1.6 -3",  to:"s3", label:"去場景3" },
+          { id:"open_progress", pos:"0 1.1 -3", action:"toggleProgress", label:"看進度" }
+        ],
+        infoHotspots: []
+      },
+      s2: {
+        name: "2｜植物A 介紹",
+        img: "school2.jpg",
+        rotation: "0 -90 0",
+        navHotspots: [
+          { id:"nav_s2_home", pos:"0 1.6 -3", to:"s1", label:"回首頁" }
+        ],
+        infoHotspots: [
+          { id:"info_s2_1", pos:"-2.0 1.6 -3", title:"植物A｜特色圖 1", text:"（可留空）", img:"plantA_1.png" },
+          { id:"info_s2_2", pos:"-2.0 1.1 -3", title:"植物A｜特色圖 2", text:"（可留空）", img:"plantA_2.png" }
+        ]
+      },
+      s3: {
+        name: "3｜植物B 介紹",
+        img: "school3.jpg",
+        rotation: "0 -90 0",
+        navHotspots: [
+          { id:"nav_s3_home", pos:"0 1.6 -3", to:"s1", label:"回首頁" }
+        ],
+        infoHotspots: [
+          { id:"info_s3_1", pos:"-2.0 1.6 -3", title:"植物B｜特色圖 1", text:"（可留空）", img:"plantB_1.png" },
+          { id:"info_s3_2", pos:"-2.0 1.1 -3", title:"植物B｜特色圖 2", text:"（可留空）", img:"plantB_2.png" }
+        ]
+      }
+    };
+
+    // =========================
+    // 2) State / Log / Progress State
+    // =========================
+    const state = {
+      sessionId: `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      name: null,
+      currentSceneId: "s1",
+      sceneEnterMs: Date.now(),
+      seqCounter: 0,
+      sessionStartMs: Date.now(),
+      logs: [],
+
+      // 依「按鈕」完成度來算每場景進度
+      buttonDoneByScene: {}, // { s1:Set([...]), s2:Set([...]) ... }
+
+      // 放大介紹面板
+      infoList: [],
+      infoIndex: 0
+    };
+
+    function deviceInfo() {
+      return {
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        platform: navigator.platform,
+        screen: { w: screen.width, h: screen.height, dpr: window.devicePixelRatio || 1 }
+      };
+    }
+
+    function logEvent(type, data = {}) {
+      state.seqCounter++;
+      const nowMs = Date.now();
+      state.logs.push({
+        seq: state.seqCounter,
+        t: new Date(nowMs).toISOString(),
+        msFromStart: nowMs - state.sessionStartMs,
+        type,
+        name: state.name,
+        sessionId: state.sessionId,
+        sceneId: state.currentSceneId,
+        sceneDwellMsBefore: nowMs - state.sceneEnterMs,
+        data
+      });
+    }
+
+    function logSceneLeave(fromSceneId) {
+      const dwellMs = Date.now() - state.sceneEnterMs;
+      logEvent("scene_leave", { from: fromSceneId, totalSceneDwellMs: dwellMs });
+    }
+
+    // =========================
+    // 3) Billboard（熱點永遠面向相機）
+    // =========================
+    AFRAME.registerComponent("billboard", {
+      tick: function () {
+        const cam = this.el.sceneEl.camera;
+        if (!cam) return;
+        this.el.object3D.lookAt(cam.position);
+      }
+    });
+
+    function escapeAttr(s) {
+      return (s || "").replace(/;/g, "；").replace(/\n/g, " ").replace(/\r/g, " ");
+    }
+
+    // =========================
+    // 4) 世界座標面板：生成在「相機正前方」並固定
+    // =========================
+    function placePanelInFrontOfCamera(panelEl, distance = 1.6, yOffset = 0.05) {
+      const camEl = document.querySelector("a-camera");
+      if (!camEl || !panelEl) return;
+
+      const camObj = camEl.object3D;
+
+      const camPos = new THREE.Vector3();
+      camObj.getWorldPosition(camPos);
+
+      const dir = new THREE.Vector3();
+      camObj.getWorldDirection(dir);
+
+      const targetPos = camPos.clone().add(dir.multiplyScalar(distance));
+      targetPos.y += yOffset;
+
+      panelEl.object3D.position.copy(targetPos);
+      panelEl.object3D.lookAt(camPos);
+    }
+
+    // =========================
+    // 5) 進度規則：哪些 action 不算進度（純 UI/翻頁/關閉）
+    // =========================
+    const EXCLUDE_ACTIONS_FROM_PROGRESS = new Set([
+      "toggleProgress", "closeProgress",
+      "closeInfo", "infoPrev", "infoNext"
+    ]);
+
+    function ensureSceneDoneSet(sceneId) {
+      if (!state.buttonDoneByScene[sceneId]) state.buttonDoneByScene[sceneId] = new Set();
+      return state.buttonDoneByScene[sceneId];
+    }
+
+    function markSceneButtonDone(sceneId, buttonId) {
+      const set = ensureSceneDoneSet(sceneId);
+      if (!set.has(buttonId)) {
+        set.add(buttonId);
+        logEvent("button_done", { sceneId, buttonId });
+      }
+      updateProgressPanel();
+    }
+
+    // 每個場景要算進度的「按鈕 id」清單
+    // - navHotspots：算進度（排除某些 action）
+    // - infoHotspots：每個放大介紹算一個進度
+    function getProgressButtonIdsForScene(sceneId) {
+      const ids = [];
+
+      (SCENES[sceneId]?.navHotspots || []).forEach(h => {
+        if (h.action && EXCLUDE_ACTIONS_FROM_PROGRESS.has(h.action)) return;
+        ids.push(h.id);
+      });
+
+      (SCENES[sceneId]?.infoHotspots || []).forEach(h => {
+        ids.push(h.id);
+      });
+
+      return ids;
+    }
+
+    // =========================
+    // 6) 建立 icon + label（黑底縮短：約 5 字寬）
+    // =========================
+    function createIconHotspot({ kind, iconSrc, id, pos, label, to, action, title, text, img, index }) {
+      const wrapper = document.createElement("a-entity");
+      wrapper.setAttribute("position", pos);
+      wrapper.setAttribute("billboard", "");
+
+      const icon = document.createElement("a-image");
+      icon.setAttribute("src", iconSrc);
+      icon.setAttribute("width", "1.05");
+      icon.setAttribute("height", "1.05");
+      icon.setAttribute("class", "hotspot"); // 游標只射 .hotspot
+
+      if (kind === "nav") {
+        if (action) {
+          icon.setAttribute("action-hotspot", `hid:${id}; action:${action}; label:${escapeAttr(label)}`);
+        } else {
+          icon.setAttribute("nav-hotspot", `hid:${id}; to:${to}; label:${escapeAttr(label)}`);
+        }
+      } else {
+        icon.setAttribute("info-hotspot",
+          `hid:${id}; index:${index ?? 0}; title:${escapeAttr(title)}; text:${escapeAttr(text)}; img:${escapeAttr(img)}`
+        );
+      }
+      wrapper.appendChild(icon);
+
+      const bg = document.createElement("a-plane");
+      bg.setAttribute("width", "1.25");
+      bg.setAttribute("height", "0.42");
+      bg.setAttribute("position", "0 -0.78 0");
+      bg.setAttribute("color", "#000");
+      bg.setAttribute("opacity", "0.60");
+      wrapper.appendChild(bg);
+
+      const labelEnt = document.createElement("a-entity");
+      labelEnt.setAttribute("position", "0 -0.78 0.01");
+      labelEnt.setAttribute("text",
+        `value:${escapeAttr(label || "")};
+         align:center;
+         color:#FFF;
+         width:1.5;
+         wrapCount:10;
+         baseline:center;
+         side:double;`
+      );
+      wrapper.appendChild(labelEnt);
+
+      return wrapper;
+    }
+
+    // =========================
+    // 7) 熱點行為（凝視 click）
+    // =========================
+    AFRAME.registerComponent("nav-hotspot", {
+      schema: { hid:{type:"string"}, to:{type:"string"}, label:{type:"string"} },
       init: function () {
         const el = this.el;
-        const sky1 = document.querySelector("#sky1");
-        const sky2 = document.querySelector("#sky2");
-
-        el.addEventListener("mouseenter", () => el.setAttribute("scale", "0.6 0.6 0.6"));
-        el.addEventListener("mouseleave", () => el.setAttribute("scale", "0.5 0.5 0.5"));
-
+        el.addEventListener("mouseenter", () => el.setAttribute("scale", "1.18 1.18 1.18"));
+        el.addEventListener("mouseleave", () => el.setAttribute("scale", "1 1 1"));
         el.addEventListener("click", () => {
-          const v1 = sky1.getAttribute("visible");
-          sky1.setAttribute("visible", !v1);
-          sky2.setAttribute("visible", v1);
-          console.log("toggle sky:", !v1 ? "sky2" : "sky1");
+          // nav 按鈕算進度（以按下為完成）
+          markSceneButtonDone(state.currentSceneId, this.data.hid);
+
+          logEvent("hotspot_activate", { kind:"nav", hotspotId:this.data.hid, to:this.data.to, label:this.data.label });
+          renderScene(this.data.to, { kind:"nav_hotspot", id:this.data.hid });
         });
       }
+    });
+
+    AFRAME.registerComponent("action-hotspot", {
+      schema: { hid:{type:"string"}, action:{type:"string"}, label:{type:"string"} },
+      init: function () {
+        const el = this.el;
+        el.addEventListener("mouseenter", () => el.setAttribute("scale", "1.18 1.18 1.18"));
+        el.addEventListener("mouseleave", () => el.setAttribute("scale", "1 1 1"));
+        el.addEventListener("click", () => {
+          logEvent("hotspot_activate", { kind:"action", hotspotId:this.data.hid, action:this.data.action, label:this.data.label });
+
+          // 只有「非 UI 類 action」才算進度
+          if (!EXCLUDE_ACTIONS_FROM_PROGRESS.has(this.data.action)) {
+            markSceneButtonDone(state.currentSceneId, this.data.hid);
+          }
+
+          if (this.data.action === "toggleProgress") toggleProgressPanel();
+          if (this.data.action === "closeProgress") closeProgressPanel();
+
+          if (this.data.action === "closeInfo") closeInfoPanel();
+          if (this.data.action === "infoPrev") infoPrev();
+          if (this.data.action === "infoNext") infoNext();
+        });
+      }
+    });
+
+    AFRAME.registerComponent("info-hotspot", {
+      schema: {
+        hid:{type:"string"},
+        index:{type:"int"},
+        title:{type:"string"},
+        text:{type:"string"},
+        img:{type:"string"}
+      },
+      init: function () {
+        const el = this.el;
+        el.addEventListener("mouseenter", () => el.setAttribute("scale", "1.18 1.18 1.18"));
+        el.addEventListener("mouseleave", () => el.setAttribute("scale", "1 1 1"));
+        el.addEventListener("click", () => {
+          // info 按鈕算進度（以按下為完成）
+          markSceneButtonDone(state.currentSceneId, this.data.hid);
+
+          logEvent("hotspot_activate", { kind:"info", hotspotId:this.data.hid, title:this.data.title, index:this.data.index });
+          openInfoPanel(this.data.index);
+        });
+      }
+    });
+
+    // =========================
+    // 8) 場景切換
+    // =========================
+    function renderScene(toSceneId, via = null) {
+      const from = state.currentSceneId;
+      if (from) logSceneLeave(from);
+
+      state.currentSceneId = toSceneId;
+      state.sceneEnterMs = Date.now();
+
+      // 切換 sky
+      Object.keys(SCENES).forEach((sid) => {
+        const sky = document.querySelector(`#sky_${sid}`);
+        if (sky) sky.setAttribute("visible", sid === toSceneId);
+      });
+
+      // 重建熱點層
+      const navLayer = document.querySelector("#navLayer");
+      const infoLayer = document.querySelector("#infoLayer");
+      while (navLayer.firstChild) navLayer.removeChild(navLayer.firstChild);
+      while (infoLayer.firstChild) infoLayer.removeChild(infoLayer.firstChild);
+
+      // nav
+      (SCENES[toSceneId].navHotspots || []).forEach((hs) => {
+        navLayer.appendChild(createIconHotspot({
+          kind: "nav",
+          iconSrc: hs.action ? "#progressIcon" : "#navIcon",
+          id: hs.id,
+          pos: hs.pos,
+          label: hs.label,
+          to: hs.to,
+          action: hs.action
+        }));
+      });
+
+      // info
+      (SCENES[toSceneId].infoHotspots || []).forEach((hs, idx) => {
+        infoLayer.appendChild(createIconHotspot({
+          kind: "info",
+          iconSrc: "#infoIcon",
+          id: hs.id,
+          pos: hs.pos,
+          label: "放大介紹",
+          title: hs.title,
+          text: hs.text,
+          img: hs.img || "",
+          index: idx
+        }));
+      });
+
+      logEvent("scene_enter", { from, to: toSceneId, via });
+
+      // 離開首頁就自動關進度面板（避免留在空間中）
+      if (toSceneId !== "s1") closeProgressPanel();
+      // 切場景時關閉放大介紹面板
+      closeInfoPanel();
+
+      updateProgressPanel();
+    }
+
+    // =========================
+    // 9) 進度面板（總進度% + 進度條 + 每場景完成%）
+    // =========================
+    function toggleProgressPanel() {
+      const panel = document.querySelector("#progressPanel");
+      if (!panel) return;
+
+      const willOpen = !panel.getAttribute("visible");
+
+      if (willOpen) {
+        placePanelInFrontOfCamera(panel, 1.6, 0.05);
+        panel.setAttribute("visible", true);
+        logEvent("progress_panel_open", {});
+        updateProgressPanel();
+      } else {
+        panel.setAttribute("visible", false);
+        logEvent("progress_panel_close", {});
+      }
+    }
+
+    function closeProgressPanel() {
+      const panel = document.querySelector("#progressPanel");
+      if (!panel) return;
+      if (panel.getAttribute("visible")) {
+        panel.setAttribute("visible", false);
+        logEvent("progress_panel_close", { auto:true });
+      }
+    }
+
+    function updateProgressPanel() {
+      const panel = document.querySelector("#progressPanel");
+      if (!panel || !panel.getAttribute("visible")) return;
+
+      const sceneIds = Object.keys(SCENES); // 包含場景1
+      let totalAll = 0;
+      let doneAll = 0;
+
+      const lines = document.querySelector("#progressLines");
+      while (lines.firstChild) lines.removeChild(lines.firstChild);
+
+      sceneIds.forEach((sid, idx) => {
+        const btnIds = getProgressButtonIdsForScene(sid);
+        const total = btnIds.length;
+        const doneSet = ensureSceneDoneSet(sid);
+        const done = btnIds.filter(id => doneSet.has(id)).length;
+
+        totalAll += total;
+        doneAll += done;
+
+        const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+
+        const sceneNo = (SCENES[sid].name.split("｜")[0] || sid).trim();
+        const rowText = `場景${sceneNo}  ${done}/${total}（${pct}%）`;
+
+        const row = document.createElement("a-entity");
+        row.setAttribute("position", `0 ${-0.22 * idx} 0`);
+        row.setAttribute("text",
+          `value:${rowText};
+           align:left;
+           color:#FFF;
+           width:2.55;
+           wrapCount:22;`
+        );
+        lines.appendChild(row);
+      });
+
+      const overallPct = totalAll === 0 ? 0 : Math.round((doneAll / totalAll) * 100);
+
+      const header = document.querySelector("#pHeader");
+      if (header) {
+        header.setAttribute("text",
+          `value: 總場景 ${sceneIds.length}｜總進度 ${overallPct}%; align:center; color:#FFF; width:3.0;`
+        );
+      }
+
+      const bar = document.querySelector("#progressBar3d");
+      if (bar) {
+        const fullW = 2.7;
+        const w = Math.max(0.001, fullW * (overallPct / 100));
+        bar.setAttribute("width", w.toFixed(4));
+        bar.setAttribute("position", `${(-fullW / 2 + w / 2).toFixed(4)} 0.52 0.02`);
+      }
+    }
+
+    // =========================
+    // 10) 放大介紹面板（上一張/下一張/關閉）
+    // =========================
+    function getCurrentInfoList() {
+      const sid = state.currentSceneId;
+      return (SCENES[sid]?.infoHotspots || []).map(h => ({
+        hid: h.id,
+        title: h.title || "放大介紹",
+        text: h.text || "",
+        img: h.img || ""
+      }));
+    }
+
+    function openInfoPanel(index = 0) {
+      state.infoList = getCurrentInfoList();
+      if (!state.infoList.length) return;
+
+      state.infoIndex = Math.max(0, Math.min(index, state.infoList.length - 1));
+      const panel = document.querySelector("#infoPanel");
+      if (!panel) return;
+
+      placePanelInFrontOfCamera(panel, 1.6, 0.05);
+      panel.setAttribute("visible", true);
+
+      logEvent("info_panel_open", { index: state.infoIndex });
+      renderInfoPanel();
+    }
+
+    function closeInfoPanel() {
+      const panel = document.querySelector("#infoPanel");
+      if (!panel) return;
+      if (panel.getAttribute("visible")) {
+        panel.setAttribute("visible", false);
+        logEvent("info_panel_close", {});
+      }
+    }
+
+    function infoPrev() {
+      if (!state.infoList.length) return;
+      state.infoIndex = (state.infoIndex - 1 + state.infoList.length) % state.infoList.length;
+      logEvent("info_panel_nav", { dir:"prev", index: state.infoIndex });
+      renderInfoPanel();
+    }
+
+    function infoNext() {
+      if (!state.infoList.length) return;
+      state.infoIndex = (state.infoIndex + 1) % state.infoList.length;
+      logEvent("info_panel_nav", { dir:"next", index: state.infoIndex });
+      renderInfoPanel();
+    }
+
+    function renderInfoPanel() {
+      const panel = document.querySelector("#infoPanel");
+      if (!panel || !panel.getAttribute("visible")) return;
+
+      const item = state.infoList[state.infoIndex];
+      if (!item) return;
+
+      const titleEl = document.querySelector("#infoTitle3d");
+      const textEl  = document.querySelector("#infoText3d");
+      const imgEl   = document.querySelector("#infoImage3d");
+      const idxEl   = document.querySelector("#infoIndex3d");
+
+      if (titleEl) titleEl.setAttribute("text", `value:${escapeAttr(item.title)}; align:center; color:#FFF; width:2.6; wrapCount:18;`);
+      if (textEl)  textEl.setAttribute("text",  `value:${escapeAttr(item.text)}; align:left; color:#FFF; width:2.6; wrapCount:28; baseline:top;`);
+      if (idxEl)   idxEl.setAttribute("text",   `value:${state.infoIndex + 1} / ${state.infoList.length}; align:center; color:#FFF; width:2.0;`);
+
+      if (imgEl) {
+        if (item.img && item.img.trim()) {
+          imgEl.setAttribute("visible", true);
+          imgEl.setAttribute("src", item.img);
+        } else {
+          imgEl.setAttribute("visible", false);
+        }
+      }
+    }
+
+    // =========================
+    // 11) 下載 log
+    // =========================
+    function downloadLogs() {
+      const currentDwellMs = Date.now() - state.sceneEnterMs;
+
+      // Set 不能直接 stringify，轉 array
+      const doneObj = {};
+      Object.keys(state.buttonDoneByScene).forEach(sid => {
+        doneObj[sid] = Array.from(state.buttonDoneByScene[sid]);
+      });
+
+      const exportObj = {
+        exportedAt: new Date().toISOString(),
+        name: state.name,
+        sessionId: state.sessionId,
+        device: deviceInfo(),
+        currentSceneId: state.currentSceneId,
+        currentSceneDwellMs: currentDwellMs,
+        progress: {
+          perSceneDoneButtonIds: doneObj,
+          perSceneTargets: Object.fromEntries(Object.keys(SCENES).map(sid => [sid, getProgressButtonIdsForScene(sid)]))
+        },
+        logs: state.logs
+      };
+
+      const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `svvr_log_${(state.name || "anon")}_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      logEvent("download_log", { filename: a.download });
+    }
+
+    // =========================
+    // 12) 初始化
+    // =========================
+    window.addEventListener("DOMContentLoaded", () => {
+      state.name = (prompt("請輸入姓名（或匿名代碼，例如 A01）：") || "").trim() || "匿名";
+      logEvent("session_start", { device: deviceInfo() });
+
+      const assetsEl = document.querySelector("a-assets");
+      const skyLayer = document.querySelector("#skyLayer");
+
+      // 預載全景圖
+      Object.entries(SCENES).forEach(([sceneId, sdata]) => {
+        const img = document.createElement("img");
+        img.setAttribute("id", `pano_${sceneId}`);
+        img.setAttribute("src", sdata.img);
+        assetsEl.appendChild(img);
+
+        const sky = document.createElement("a-sky");
+        sky.setAttribute("id", `sky_${sceneId}`);
+        sky.setAttribute("src", `#pano_${sceneId}`);
+        sky.setAttribute("visible", sceneId === state.currentSceneId);
+        sky.setAttribute("rotation", sdata.rotation || "0 0 0");
+        sky.setAttribute("material", "shader: flat; side: back;");
+        skyLayer.appendChild(sky);
+      });
+
+      // 初次 render
+      const first = state.currentSceneId;
+      state.currentSceneId = null;
+      renderScene(first, { kind:"init" });
+
+      // 手動 download
+      document.querySelector("#downloadBtn").addEventListener("click", () => {
+        logEvent("ui_click", { buttonId:"downloadBtn", label:"Download log" });
+        downloadLogs();
+      });
     });
   </script>
 </head>
@@ -30,39 +600,91 @@
 <body style="margin:0;">
   <a-scene>
     <a-assets>
-      <img id="pano1" src="school.jpg">
-      <img id="pano2" src="school2.jpg">
+      <img id="navIcon" src="nav.png">
+      <img id="infoIcon" src="info.png">
+      <img id="progressIcon" src="progress.png">
     </a-assets>
 
-    <!-- 兩個 sky 都先建好 -->
-    <a-sky id="sky1"
-      src="#pano1"
-      visible="true"
-      rotation="0 -90 0"
-      material="shader: flat; side: back;"
-    ></a-sky>
+    <a-entity id="skyLayer"></a-entity>
+    <a-entity id="navLayer"></a-entity>
+    <a-entity id="infoLayer"></a-entity>
 
-    <a-sky id="sky2"
-      src="#pano2"
-      visible="false"
-      rotation="0 -90 0"
-      material="shader: flat; side: back;"
-    ></a-sky>
+    <!-- ✅ 世界座標 UI 面板層 -->
+    <a-entity id="uiWorldLayer">
 
-    <!-- 熱點：凝視後切換 -->
-    <a-sphere
-      switch-sky
-      position="0 1.5 -3"
-      radius="0.3"
-      color="#FFD700"
-      scale="0.5 0.5 0.5"
-    ></a-sphere>
+      <!-- ✅ 進度面板：總進度% + 進度條 + 每場景（該場景%） -->
+      <a-entity id="progressPanel" visible="false">
+        <a-plane width="3.2" height="1.75" color="#000" opacity="0.60"></a-plane>
 
+        <a-entity id="pHeader" position="0 0.70 0.01"
+          text="value: 總場景 0｜總進度 0%; align:center; color:#FFF; width:3.0;"></a-entity>
+
+        <a-plane position="0 0.52 0.01" width="2.7" height="0.12" color="#333" opacity="0.95"></a-plane>
+        <a-plane id="progressBar3d" position="-1.35 0.52 0.02" width="0.001" height="0.12" color="#fff" opacity="0.95"></a-plane>
+
+        <a-plane position="0 0.08 0.005" width="2.85" height="0.85" color="#000" opacity="0.20"></a-plane>
+        <a-entity id="progressLines" position="-1.30 0.33 0.01"></a-entity>
+
+        <a-entity position="0 -0.70 0.02">
+          <a-plane class="hotspot"
+            action-hotspot="hid:progress_close; action:closeProgress; label:關閉進度"
+            width="1.05" height="0.28" color="#222" opacity="0.9"></a-plane>
+          <a-entity position="0 0 0.01"
+            text="value: 關閉; align:center; color:#FFF; width:1.4;"></a-entity>
+        </a-entity>
+      </a-entity>
+
+      <!-- ✅ 放大介紹面板 -->
+      <a-entity id="infoPanel" visible="false">
+        <a-plane width="2.8" height="1.55" color="#000" opacity="0.60"></a-plane>
+
+        <a-entity id="infoTitle3d" position="0 0.62 0.01"
+          text="value: 放大介紹; align:center; color:#FFF; width:2.6; wrapCount:18;"></a-entity>
+
+        <a-image id="infoImage3d" position="0 0.20 0.01" width="2.55" height="0.78" visible="false"></a-image>
+
+        <a-entity id="infoText3d" position="-1.25 -0.25 0.01"
+          text="value: ; align:left; color:#FFF; width:2.6; wrapCount:28; baseline:top;"></a-entity>
+
+        <a-entity id="infoIndex3d" position="0 -0.62 0.01"
+          text="value: 1 / 1; align:center; color:#FFF; width:2.0;"></a-entity>
+
+        <a-entity position="0 -0.82 0.02">
+          <a-plane class="hotspot" action-hotspot="hid:info_prev; action:infoPrev; label:上一張"
+            position="-0.9 0 0" width="0.78" height="0.24" color="#111" opacity="0.9"></a-plane>
+          <a-entity position="-0.9 0 0.01" text="value: 上一張; align:center; color:#FFF; width:1.2;"></a-entity>
+
+          <a-plane class="hotspot" action-hotspot="hid:info_next; action:infoNext; label:下一張"
+            position="0.0 0 0" width="0.78" height="0.24" color="#111" opacity="0.9"></a-plane>
+          <a-entity position="0.0 0 0.01" text="value: 下一張; align:center; color:#FFF; width:1.2;"></a-entity>
+
+          <a-plane class="hotspot" action-hotspot="hid:info_close; action:closeInfo; label:關閉"
+            position="0.9 0 0" width="0.78" height="0.24" color="#222" opacity="0.9"></a-plane>
+          <a-entity position="0.9 0 0.01" text="value: 關閉; align:center; color:#FFF; width:1.2;"></a-entity>
+        </a-entity>
+      </a-entity>
+
+    </a-entity>
+
+    <!-- 相機 + 凝視 -->
     <a-entity position="0 1.6 0">
       <a-camera>
-        <a-cursor fuse="true" fuse-timeout="1500"></a-cursor>
+        <a-cursor
+          fuse="true"
+          fuse-timeout="1500"
+          raycaster="objects: .hotspot"
+          geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.016"
+          material="color: white; shader: flat; opacity: 0.95"
+          animation__fusing="property: scale; startEvents: fusing; from: 1 1 1; to: 1.6 1.6 1; dur: 1500"
+          animation__click="property: scale; startEvents: click; from: 1 1 1; to: 0.85 0.85 1; dur: 120"
+        ></a-cursor>
       </a-camera>
     </a-entity>
   </a-scene>
+
+  <!-- 手動下載 -->
+  <button class="hud btn" id="downloadBtn" style="top:12px; left:12px;">
+    Download log.json
+  </button>
 </body>
 </html>
