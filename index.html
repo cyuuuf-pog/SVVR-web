@@ -457,7 +457,7 @@
         if (btn) btn.setAttribute('material', 'color', '#333');
       });
 
-      setText('#quizNextText', (rt.idx < topic.quiz.questions.length-1) ? '下一題' : '提交');
+      setText('#quizNextText', (rt.idx < topic.quiz.questions.length-1) ? '下一題' : '送出');
     }
 
     function chooseOption(optIndex){
@@ -475,6 +475,16 @@
       }
 
       logEvent('quiz_choose', { topicId: rt.topicId, data: { q: rt.idx, choice: optIndex } });
+    }
+
+    function prevQuiz(){
+      const rt = state.quizRuntime;
+      if (!rt) return;
+      if (rt.idx <= 0) return;
+      rt.idx -= 1;
+      saveState();
+      renderQuizQuestion();
+      logEvent('quiz_prev', { topicId: rt.topicId, data: { q: rt.idx } });
     }
 
     function nextOrSubmitQuiz(){
@@ -546,6 +556,7 @@
             return startQuiz(this.data.a);
           }
           if (act === 'chooseOpt')   return chooseOption(parseInt(this.data.a,10));
+          if (act === 'prevQuiz')   return prevQuiz();
           if (act === 'nextQuiz')    return nextOrSubmitQuiz();
           if (act === 'closeInfo')   return closeInfoPanel();
           if (act === 'downloadLog') return downloadLog();
@@ -564,37 +575,28 @@
     window.addEventListener('DOMContentLoaded', () => {
       loadState();
 
-      // Name Gate
+      // Name Gate：每次都顯示（避免看不到輸入名字）
       const gate  = document.getElementById('nameGate');
       const input = document.getElementById('studentNameInput');
       const btn   = document.getElementById('startBtn');
 
-      const savedName = localStorage.getItem(STORAGE_KEY_NAME);
-      if (savedName) gate.style.display = 'none';
-      else {
-        gate.style.display = 'flex';
-        setTimeout(() => input && input.focus(), 50);
-      }
+      const savedName = localStorage.getItem(STORAGE_KEY_NAME) || '';
+      gate.style.display = 'flex';
+      if (input) input.value = savedName;
+      setTimeout(() => input && input.focus(), 50);
 
       function start(){
         const name = (input?.value || '').trim();
         if (!name) { input && input.focus(); return; }
         localStorage.setItem(STORAGE_KEY_NAME, name);
         gate.style.display = 'none';
+
+        // ✅ 一律從 scene1（Topic 選單）開始
         goTopicMenu();
       }
       btn?.addEventListener('click', start);
       input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
-
-      // Restore navigation if name exists
-      if (savedName) {
-        const cur = state.current || { level: "topicMenu" };
-        if (cur.level === 'hub' && cur.topicId) return goHub(cur.topicId);
-        if (cur.level === 'lesson' && cur.topicId && cur.lessonId) return goLesson(cur.topicId, cur.lessonId);
-        return goTopicMenu();
-      }
-    });
-  </script>
+    });</script>
 </head>
 
 <body style="margin:0; background:#000;">
@@ -772,9 +774,9 @@
                 position="0 -1.8 0.06"></a-entity>
 
       <a-box data-ui="true" class="clickable" id="quizNextBtn" ui-action="action: nextQuiz"
-             position="0 -2.15 0" scale="1.2 0.24 0.1" color="#2f7cff"></a-box>
+             position="0.8 -2.15 0" scale="1.2 0.24 0.1" color="#2f7cff"></a-box>
       <a-entity id="quizNextText" text="value: 下一題; align: center; width: 2.6; color:#fff"
-                position="0 -2.15 0.06"></a-entity>
+                position="0.8 -2.15 0.06"></a-entity>
     </a-entity>
 
     <!-- Info Panel -->
