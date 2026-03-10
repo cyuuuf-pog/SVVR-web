@@ -3,11 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>SVVR 三層架構骨架（Topic → Hub → Lesson）</title>
+  <title>SVVR 三層架構（分散 Hotspot + 大型閱讀面板）</title>
   <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
 
   <style>
-    /* ====== 名字輸入 Gate（HTML Overlay） ====== */
     #nameGate{
       position:fixed; inset:0;
       background:rgba(0,0,0,0.85);
@@ -27,38 +26,21 @@
     #nameCard p{ margin:0 0 12px; font-size:13px; opacity:.9; line-height:1.5; }
     #nameRow{ display:flex; gap:10px; }
     #studentNameInput{
-      flex:1;
-      font-size:16px;
-      padding:10px 12px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,0.22);
-      background:rgba(255,255,255,0.08);
-      color:#fff;
-      outline:none;
+      flex:1; font-size:16px; padding:10px 12px; border-radius:10px;
+      border:1px solid rgba(255,255,255,0.22); background:rgba(255,255,255,0.08);
+      color:#fff; outline:none;
     }
     #startBtn{
-      font-size:16px;
-      padding:10px 14px;
-      border-radius:10px;
-      border:0;
-      background:#2f7cff;
-      color:#fff;
-      cursor:pointer;
-      white-space:nowrap;
+      font-size:16px; padding:10px 14px; border-radius:10px; border:0;
+      background:#2f7cff; color:#fff; cursor:pointer; white-space:nowrap;
     }
     #hint{ margin-top:10px; font-size:12px; opacity:.75; }
   </style>
 
   <script>
-    // =========================
-    // 0) 全域：狀態 / 設定
-    // =========================
     const STORAGE_KEY_NAME  = 'svvr_student_name_v1';
     const STORAGE_KEY_STATE = 'svvr_state_v1';
 
-    const GAZE_TIMEOUT_MS = 3000; // 凝視點選 3 秒
-
-    // 三層架構：TopicMenu → Hub(topic) → Lesson(topic, lesson)
     const TOPICS = {
       t1: {
         name: "Topic 1｜植物分類 A",
@@ -118,7 +100,7 @@
 
     let state = {
       version: 1,
-      current: { level: "topicMenu", topicId: null, lessonId: null },
+      current: { level: "topicMenu", topicId: null, lessonId: null, enteredAt: null },
       progress: {},
       progressSeen: {},
       quiz: {},
@@ -126,11 +108,7 @@
       logs: []
     };
 
-    function nowTs(){ return Date.now(); }
-    function logEvent(type, extra={}){
-      state.logs.push({ ts: nowTs(), type, ...extra });
-      saveState();
-    }
+    let hubProgressOpen = false;
 
     function saveState(){
       try { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state)); } catch(e){}
@@ -144,7 +122,59 @@
       } catch(e){}
     }
 
+    function nowTs(){ return Date.now(); }
+    function formatLocalTime(ts){
+      const d = new Date(ts);
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      const h = String(d.getHours()).padStart(2,'0');
+      const min = String(d.getMinutes()).padStart(2,'0');
+      const s = String(d.getSeconds()).padStart(2,'0');
+      return `${y}-${m}-${day} ${h}:${min}:${s}`;
+    }
+    function currentSceneDuration(){
+      const enteredAt = state?.current?.enteredAt;
+      if (!enteredAt) return 0;
+      return Math.max(0, Number(((Date.now() - enteredAt) / 1000).toFixed(1)));
+    }
+    function setCurrentScene(level, topicId=null, lessonId=null){
+      state.current = { level, topicId, lessonId, enteredAt: nowTs() };
+    }
+    function buildLogEntry(type, extra={}){
+      const topicId = extra.topic_id ?? extra.topicId ?? state?.current?.topicId ?? '';
+      const sceneId = extra.scene_id ?? extra.sceneId ?? state?.current?.lessonId ?? (topicId ? `${topicId}_hub` : state?.current?.level || 'topic_menu');
+      const entry = {
+        time: formatLocalTime(nowTs()),
+        topic_id: topicId || '',
+        scene_id: sceneId || '',
+        event_type: type || '',
+        hotspot_id: extra.hotspot_id ?? extra.hotspotId ?? '',
+        question_id: extra.question_id ?? '',
+        selected_option: extra.selected_option ?? '',
+        correct_answer: extra.correct_answer ?? '',
+        is_correct: extra.is_correct ?? '',
+        duration_in_scene: extra.duration_in_scene ?? currentSceneDuration()
+      };
+      return entry;
+    }
+    function logEvent(type, extra={}){
+      state.logs.push(buildLogEntry(type, extra));
+      saveState();
+    }
+
     function qs(sel){ return document.querySelector(sel); }
+    const RAYCAST_PARK_POS = '0 -999 5';
+    function parkForRaycast(sel, park){
+      const el = typeof sel === 'string' ? qs(sel) : sel;
+      if (!el) return;
+      if (!el.dataset.homePosition) {
+        const p = el.getAttribute('position');
+        if (p && typeof p === 'object') el.dataset.homePosition = `${p.x} ${p.y} ${p.z}`;
+        else el.dataset.homePosition = (p || '0 0 0');
+      }
+      el.setAttribute('position', park ? RAYCAST_PARK_POS : el.dataset.homePosition);
+    }
     function setVisible(sel, visible){
       const el = qs(sel);
       if (!el) return;
@@ -155,23 +185,68 @@
       if (!el) return;
       el.setAttribute('text', 'value', value);
     }
+    function isEntityVisible(sel){
+      const el = qs(sel);
+      return !!(el && el.getAttribute('visible'));
+    }
+    function isAnyOverlayOpen(){
+      const typingOpen = !!(document.getElementById('gptTypeOverlay') && document.getElementById('gptTypeOverlay').style.display !== 'none');
+      return isEntityVisible('#infoPanel') || isEntityVisible('#gptVrPanel') || isEntityVisible('#hubProgressPanel') || typingOpen;
+    }
+    function activeOverlayType(){
+      if (isEntityVisible('#infoPanel')) return 'info';
+      if (isEntityVisible('#gptVrPanel')) return 'gpt';
+      if (isEntityVisible('#hubProgressPanel')) return 'progress';
+      if (document.getElementById('gptTypeOverlay') && document.getElementById('gptTypeOverlay').style.display !== 'none') return 'gptTyping';
+      return '';
+    }
 
     function hideAllPages(){
-      setVisible('#pageTopicMenu', false);
-      setVisible('#pageHub', false);
-      setVisible('#pageLesson', false);
-      setVisible('#pageQuiz', false);
+      ['#pageTopicMenu', '#pageHub', '#pageQuiz', '#pageLesson'].forEach(sel => {
+        setVisible(sel, false);
+        parkForRaycast(sel, true);
+      });
+      document.querySelectorAll('[id^="pageLesson-"]').forEach(el => {
+        el.setAttribute('visible', false);
+        parkForRaycast(el, true);
+      });
+    }
+
+    function hideAllHotspotGroups(){
+      for (const t of Object.values(TOPICS)) {
+        for (const lesson of t.lessons) {
+          setVisible(lesson.hotspotsGroup, false);
+          parkForRaycast(lesson.hotspotsGroup, true);
+        }
+      }
     }
 
     function setSky(srcSelector){
       const sky = qs('#sky');
       if (!sky) return;
+      sky.setAttribute('src', srcSelector);
       sky.setAttribute('material', 'src', srcSelector);
     }
 
     function setHud(title){
       const name = localStorage.getItem(STORAGE_KEY_NAME) || '未命名';
       setText('#hudText', `${name}｜${title}`);
+    }
+
+    function toggleHubProgress(force){
+      const panel = qs('#hubProgressPanel');
+      if (!panel) return;
+      const wasOpen = hubProgressOpen;
+      hubProgressOpen = (force !== undefined) ? !!force : !hubProgressOpen;
+      panel.setAttribute('visible', hubProgressOpen);
+      setText('#hubQuizStatus', hubProgressOpen ? '選擇題：先關閉進度面板再開始' : (isTopicComplete(state.current.topicId) ? '選擇題：已解鎖' : '選擇題：完成所有單元後解鎖'));
+      if (hubProgressOpen !== wasOpen) {
+        logEvent(hubProgressOpen ? 'progress_open' : 'progress_close', {
+          topic_id: state?.current?.topicId || '',
+          scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+        });
+      }
+      updateUiLock();
     }
 
     function setClickableLock(locked){
@@ -186,23 +261,43 @@
       qs('#infoCloseBtn')?.classList.add('clickable');
     }
 
+    function updateUiLock(){
+      const locked = isAnyOverlayOpen();
+      setClickableLock(locked);
+      if (!locked) return;
+      const t = activeOverlayType();
+      if (t === 'info') qs('#infoCloseBtn')?.classList.add('clickable');
+      if (t === 'progress') {
+        qs('#btnCloseProgress')?.classList.add('clickable');
+        qs('#btnOpenProgress')?.classList.add('clickable');
+      }
+      if (t === 'gpt') qs('#gptCloseBtn')?.classList.add('clickable');
+    }
     function closeInfoPanel(){
       setVisible('#infoPanel', false);
-      setClickableLock(false);
+      updateUiLock();
+    }
+    function closeProgressPanel(){
+      if (!hubProgressOpen) return;
+      toggleHubProgress(false);
     }
 
     function goTopicMenu(){
+      closeGptVr();
+      gptCloseTyping();
+      toggleHubProgress(false);
       hideAllHotspotGroups();
-      state.current = { level: "topicMenu", topicId: null, lessonId: null };
+      setCurrentScene('topicMenu', null, null);
       saveState();
       closeInfoPanel();
 
       hideAllPages();
       setSky('#pano_topic_menu');
       setHud('Topic 選單');
+      parkForRaycast('#pageTopicMenu', false);
       setVisible('#pageTopicMenu', true);
 
-      logEvent('nav_topic_menu', {});
+      logEvent('nav_topic_menu', { scene_id: 'topic_menu' });
     }
 
     function initLessonProgress(lesson){
@@ -235,22 +330,33 @@
       if (!topic) return;
 
       setText('#hubTitle', `${topic.name}`);
-      setText('#hubObjectives', topic.objectives.map((o,i)=>`${i+1}. ${o}`).join('\\n'));
+      setText('#hubObjectives', topic.objectives.map((o,i)=>`${i+1}. ${o}`).join('\n'));
 
+      setText('#hubProgressTopicTitle', `${topic.name}`);
+      setText('#hubProgressTopicSub', '目前各單元學習進度');
+
+      let completedCount = 0;
       topic.lessons.forEach((lesson, idx) => {
         initLessonProgress(lesson);
         const p = state.progress[lesson.id];
-        const percent = Math.round((p.doneHotspots / p.totalHotspots) * 100);
-        setText(`#hubLessonLabel${idx+1}`, `${lesson.name}\\n${percent}%`);
+        const ratio = Math.max(0, Math.min(1, p.doneHotspots / p.totalHotspots));
+        const percent = Math.round(ratio * 100);
+        if (p.completed) completedCount += 1;
+
+        setText(`#hubProgressRowLabel${idx+1}`, `${lesson.name}`);
+        setText(`#hubProgressText${idx+1}`, `${percent}%`);
+        setText(`#hubProgressStatus${idx+1}`, p.completed ? '已完成' : `已完成 ${p.doneHotspots}/${p.totalHotspots}`);
 
         const fill = qs(`#hubBarFill${idx+1}`);
         if (fill) {
-          fill.setAttribute('scale', `${Math.max(0, Math.min(1, p.doneHotspots / p.totalHotspots))} 1 1`);
+          fill.setAttribute('scale', `${ratio} 1 1`);
         }
       });
 
+      setText('#hubProgressSummary', `Topic 完成度：${completedCount}/${topic.lessons.length} 單元`);
+
       const unlocked = isTopicComplete(topicId);
-      setText('#hubQuizStatus', unlocked ? '測驗：已解鎖' : '測驗：完成所有單元後解鎖');
+      setText('#hubQuizStatus', unlocked ? '選擇題：已解鎖' : '選擇題：完成所有單元後解鎖');
 
       const quizState = state.quiz[topicId];
       const quizBtn = qs('#btnStartQuiz');
@@ -268,47 +374,34 @@
           ...quizState.details.map((d, i) => `Q${i+1}：${d.correct ? '✅' : '❌'}  ${d.explain}`)
         ];
         setVisible('#hubQuizResultPanel', true);
-        setText('#hubQuizResultText', lines.join('\\n'));
+        setText('#hubQuizResultText', lines.join('\n'));
       } else {
         setVisible('#hubQuizResultPanel', false);
         setText('#hubQuizResultText', '');
       }
     }
 
-    function hideAllHotspotGroups(){
-      for (const t of Object.values(TOPICS)) {
-        for (const lesson of t.lessons) {
-          setVisible(lesson.hotspotsGroup, false);
-        }
-      }
-    }
-
     function patchHubLessonButtons(topicId){
-      const topic = TOPICS[topicId];
-      if (!topic) return;
-
-      const btns = [qs('#btnLesson1'), qs('#btnLesson2'), qs('#btnLesson3')];
-      topic.lessons.forEach((lesson, idx) => {
-        const btn = btns[idx];
-        if (!btn) return;
-        btn.setAttribute('ui-action', `action: goLesson; a: ${topicId}; b: ${lesson.id}`);
+      ['t1','t2','t3'].forEach(id => {
+        const active = id === topicId;
+        setVisible(`#hubLessonGroup-${id}`, active);
+        parkForRaycast(`#hubLessonGroup-${id}`, !active);
       });
-
-      const backBtn = qs('#btnBackToHub');
-      if (backBtn) backBtn.setAttribute('ui-action', `action: goHub; a: ${topicId}`);
-
       const quizBtn = qs('#btnStartQuiz');
       if (quizBtn) quizBtn.setAttribute('ui-action', `action: startQuiz; a: ${topicId}`);
     }
 
     function goHub(topicId){
+      closeGptVr();
+      gptCloseTyping();
+      toggleHubProgress(false);
       hideAllHotspotGroups();
       const topic = TOPICS[topicId];
       if (!topic) return;
 
       patchHubLessonButtons(topicId);
 
-      state.current = { level: "hub", topicId, lessonId: null };
+      setCurrentScene('hub', topicId, null);
       saveState();
       closeInfoPanel();
 
@@ -316,19 +409,23 @@
       setSky(topic.hubPano);
       setHud(`Hub｜${topic.name}`);
 
+      parkForRaycast('#pageHub', false);
       setVisible('#pageHub', true);
       refreshHubUI(topicId);
 
-      logEvent('nav_hub', { topicId });
+      logEvent('nav_hub', { topic_id: topicId, scene_id: `${topicId}_hub` });
     }
 
     function goLesson(topicId, lessonId){
+      closeGptVr();
+      gptCloseTyping();
+      toggleHubProgress(false);
       const topic = TOPICS[topicId];
       if (!topic) return;
       const lesson = topic.lessons.find(x => x.id === lessonId);
       if (!lesson) return;
 
-      state.current = { level: "lesson", topicId, lessonId };
+      setCurrentScene('lesson', topicId, lessonId);
       saveState();
       closeInfoPanel();
 
@@ -336,13 +433,15 @@
       setSky(lesson.pano);
       setHud(`${topic.name}｜${lesson.name}`);
 
-      setVisible('#pageLesson', true);
+      parkForRaycast(`#pageLesson-${lesson.id}`, false);
+      setVisible(`#pageLesson-${lesson.id}`, true);
       hideAllHotspotGroups();
+      parkForRaycast(lesson.hotspotsGroup, false);
       setVisible(lesson.hotspotsGroup, true);
 
       initLessonProgress(lesson);
 
-      logEvent('nav_lesson', { topicId, lessonId });
+      logEvent('nav_lesson', { topic_id: topicId, scene_id: lessonId });
     }
 
     function faceCameraYaw(panelEl){
@@ -374,20 +473,42 @@
       p.completed = (p.doneHotspots >= p.totalHotspots);
       saveState();
 
-      logEvent('hotspot_open', { topicId, lessonId, data: { hotspotId } });
-
-      // 若回到 Hub，進度會更新；如果你想在 lesson 當下也顯示提示，可以加 HUD flash
+      logEvent('hotspot_open', { topic_id: topicId, scene_id: lessonId, hotspot_id: hotspotId });
     }
 
-    AFRAME.registerComponent('hotspot-panel', {
+    
+    // 讓介面按鈕與文字自動朝向場景中心（保持水平，不歪斜）
+    AFRAME.registerComponent('face-center', {
+      init: function(){
+        this.updateFacing = this.updateFacing.bind(this);
+        // 等物件進場後再轉向
+        setTimeout(this.updateFacing, 80);
+      },
+      updateFacing: function(){
+        if (!this.el || !this.el.object3D || !window.THREE) return;
+        const pos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(pos);
+
+        // 朝向世界中心的同高度位置，只轉水平視角
+        const target = new THREE.Vector3(0, pos.y, 0);
+        this.el.object3D.lookAt(target);
+
+        // 修正 2D 平面/文字的朝向，使正面朝向中心
+        const rot = this.el.getAttribute('rotation') || {x:0,y:0,z:0};
+        this.el.setAttribute('rotation', `${rot.x || 0} ${(this.el.object3D.rotation.y * 180 / Math.PI)} ${rot.z || 0}`);
+      }
+    });
+
+AFRAME.registerComponent('hotspot-panel', {
       schema: {
         img: { type: 'selector' },
         side: { default: 'right' },
-        distance: { default: 0.65 },
+        distance: { default: 1.0 },
         hid: { default: '' }
       },
       init: function(){
         this.onClick = () => {
+          if (isAnyOverlayOpen()) return;
           const panel = qs('#infoPanel');
           const imgPlane = qs('#infoImage');
           if (!panel || !imgPlane || !window.THREE) return;
@@ -400,7 +521,6 @@
 
           const imgEl = this.data.img;
           if (imgEl) imgPlane.setAttribute('material', 'src', `#${imgEl.id}`);
-          else imgPlane.setAttribute('material', 'color', '#222');
 
           const p = new THREE.Vector3();
           this.el.object3D.getWorldPosition(p);
@@ -416,7 +536,7 @@
           panel.setAttribute('visible', true);
           faceCameraYaw(panel);
 
-          setClickableLock(true);
+          updateUiLock();
         };
         this.el.addEventListener('click', this.onClick);
       },
@@ -426,20 +546,24 @@
     });
 
     function startQuiz(topicId){
+      closeGptVr();
+      gptCloseTyping();
+      toggleHubProgress(false);
       hideAllHotspotGroups();
       if (!isTopicComplete(topicId)) return;
       if (state.quiz[topicId]?.done) return;
 
       closeInfoPanel();
       hideAllPages();
+      parkForRaycast('#pageQuiz', false);
       setVisible('#pageQuiz', true);
       setHud(`測驗｜${TOPICS[topicId].name}`);
 
-      state.quizRuntime = { topicId, idx: 0, chosen: [] };
+      state.quizRuntime = { topicId, idx: 0, chosen: [], startedAt: nowTs() };
       saveState();
 
       renderQuizQuestion();
-      logEvent('quiz_start', { topicId });
+      logEvent('quiz_start', { topic_id: topicId, scene_id: `${topicId}_quiz` });
     }
 
     function renderQuizQuestion(){
@@ -474,7 +598,12 @@
         if (btn) btn.setAttribute('material', 'color', (i===optIndex) ? '#2f7cff' : '#333');
       }
 
-      logEvent('quiz_choose', { topicId: rt.topicId, data: { q: rt.idx, choice: optIndex } });
+      logEvent('quiz_choose', {
+        topic_id: rt.topicId,
+        scene_id: `${rt.topicId}_quiz`,
+        question_id: `q${rt.idx+1}`,
+        selected_option: qObj.options[optIndex] ?? optIndex
+      });
     }
 
     function prevQuiz(){
@@ -521,7 +650,18 @@
       state.quizRuntime = null;
       saveState();
 
-      logEvent('quiz_submit', { topicId: rt.topicId, data: { score, total } });
+      topic.quiz.questions.forEach((q, i) => {
+        const chosenIndex = rt.chosen[i];
+        logEvent('quiz_submit', {
+          topic_id: rt.topicId,
+          scene_id: `${rt.topicId}_quiz`,
+          question_id: `q${i+1}`,
+          selected_option: q.options[chosenIndex] ?? '',
+          correct_answer: q.options[q.answer] ?? q.answer,
+          is_correct: chosenIndex === q.answer ? 'true' : 'false',
+          duration_in_scene: Number((((nowTs() - (rt.startedAt || nowTs())) / 1000)).toFixed(1))
+        });
+      });
 
       goHub(rt.topicId);
     }
@@ -529,15 +669,20 @@
     function downloadLog(){
       try{
         const name = localStorage.getItem(STORAGE_KEY_NAME) || 'user';
-        const payload = JSON.stringify(state, null, 2);
+        logEvent('download_log', {
+          topic_id: state?.current?.topicId || '',
+          scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+        });
+        const payload = JSON.stringify(state.logs, null, 2);
         const blob = new Blob([payload], {type:'application/json'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `svvr_log_${name}_${Date.now()}.json`;
+        a.download = `svvr_log_${name}.json`;
+        document.body.appendChild(a);
         a.click();
+        setTimeout(() => { try{ a.remove(); }catch(e){} }, 0);
         URL.revokeObjectURL(url);
-        logEvent('download_log', {});
       }catch(e){}
     }
 
@@ -546,24 +691,33 @@
       init: function(){
         this.onClick = () => {
           const act = this.data.action;
+          const closers = ['closeInfo','gptClose','toggleProgress'];
+          if (isAnyOverlayOpen()) {
+            const overlay = activeOverlayType();
+            if (!(overlay === 'progress' && act === 'toggleProgress') && !(overlay === 'info' && act === 'closeInfo') && !(overlay === 'gpt' && act === 'gptClose')) {
+              return;
+            }
+          }
 
           if (act === 'goTopicMenu') return goTopicMenu();
           if (act === 'goHub')       return goHub(this.data.a);
           if (act === 'goLesson')    return goLesson(this.data.a, this.data.b);
           if (act === 'startQuiz') {
-            // button may be visually disabled; still hard-block here
             if (qs('#btnStartQuiz')?.getAttribute('data-enabled') !== 'true') return;
             return startQuiz(this.data.a);
           }
           if (act === 'chooseOpt')   return chooseOption(parseInt(this.data.a,10));
-          if (act === 'prevQuiz')   return prevQuiz();
+          if (act === 'prevQuiz')    return prevQuiz();
           if (act === 'nextQuiz')    return nextOrSubmitQuiz();
           if (act === 'closeInfo')   return closeInfoPanel();
           if (act === 'downloadLog') return downloadLog();
-          if (act === 'openGPT') {
-            alert('GPT API：骨架先留按鈕，之後再接後端。');
-            return;
-          }
+          if (act === 'toggleProgress') return toggleHubProgress();
+          if (act === 'openGPT')  return openGptVr();
+          if (act === 'gptClose') return closeGptVr();
+          if (act === 'gptRecStart') return gptStartRecording();
+          if (act === 'gptRecStop') return gptStopRecording(false);
+          if (act === 'gptSend') return gptSend();
+          if (act === 'gptType') return gptOpenTyping();
         };
         this.el.addEventListener('click', this.onClick);
       },
@@ -572,10 +726,248 @@
       }
     });
 
+    
+    // =========================
+    // GPT VR：語音（錄音上傳轉文字）+ 打字備用
+    // =========================
+    let gptRT = {
+      transcript: '',
+      busy: false,
+      rec: null,
+      chunks: [],
+      stream: null
+    };
+
+    const GPT_MAX_RECORD_MS = 8000; // 防 payload 過大（建議 5~10 秒）
+    let gptRecordTimer = null;
+
+    function gptSetStatus(s){ setText('#gptVrStatus', `狀態：${s}`); }
+    function gptSetTranscript(t){
+      gptRT.transcript = (t || '').trim();
+      setText('#gptVrTranscript', `輸入內容：\n${gptRT.transcript || '（尚未輸入）'}`);
+    }
+    function gptSetAnswer(t){
+      setText('#gptVrAnswer', `AI 回答：\n${t || '（尚未送出）'}`);
+    }
+
+    function openGptVr(){ if (isEntityVisible('#gptVrPanel')) return; setVisible('#gptVrPanel', true); gptSetStatus('待命'); updateUiLock(); logEvent('gpt_open', { topic_id: state?.current?.topicId || '', scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu') }); }
+    function closeGptVr(){ const wasOpen = isEntityVisible('#gptVrPanel'); setVisible('#gptVrPanel', false); gptStopRecording(true); updateUiLock(); if (wasOpen) logEvent('gpt_close', { topic_id: state?.current?.topicId || '', scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu') }); }
+
+    async function gptStartRecording(){
+      // iOS/Safari 可能不支援 MediaRecorder
+      if (!window.MediaRecorder) {
+        gptSetStatus('此瀏覽器不支援錄音（建議改用「⌨ 打字」）');
+        gptSetAnswer('（提示）iOS Safari 某些版本沒有 MediaRecorder，因此無法直接錄音。');
+        return;
+      }
+      if (gptRT.busy) return;
+      if (gptRT.rec) return;
+
+      gptSetStatus('準備錄音…');
+
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        gptRT.stream = stream;
+        gptRT.chunks = [];
+
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/m4a'
+        ];
+        let mimeType = '';
+        for (const c of candidates){
+          if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)){
+            mimeType = c; break;
+          }
+        }
+
+        const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        gptRT.rec = rec;
+
+        rec.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) gptRT.chunks.push(e.data);
+        };
+        rec.onstop = async () => {
+          try { clearTimeout(gptRecordTimer); } catch(e) {}
+          gptRecordTimer = null;
+          const blob = new Blob(gptRT.chunks, { type: rec.mimeType || 'audio/webm' });
+          // 若錄音太久，blob 會很大，可能造成 Vercel 回 413 / 500
+          if (blob.size > 3_000_000) {
+            gptSetStatus('錄音檔偏大（建議縮短錄音）');
+          }
+          try{ gptRT.stream?.getTracks()?.forEach(t=>t.stop()); }catch(e){}
+          gptRT.stream = null;
+
+          gptSetStatus('轉文字中…');
+          try{
+            const text = await gptTranscribeBlob(blob);
+            gptSetTranscript(text);
+            gptSetStatus('待命（可送出）');
+          }catch(err){
+            gptSetStatus('轉文字失敗');
+            gptSetAnswer(`（轉文字失敗）${err?.message || err}`);
+          } finally {
+            gptRT.rec = null;
+          }
+        };
+
+        rec.start();
+        // 自動停止，避免錄太久造成 base64 太大
+        try { clearTimeout(gptRecordTimer); } catch(e) {}
+        gptRecordTimer = setTimeout(() => {
+          try {
+            if (gptRT.rec && gptRT.rec.state !== 'inactive') {
+              gptSetStatus('已達錄音上限，已自動停止…');
+              gptStopRecording(false);
+            }
+          } catch(e) {}
+        }, GPT_MAX_RECORD_MS);
+
+        gptSetStatus('錄音中…（說完按「停止」；最長 8 秒）');
+      }catch(err){
+        gptSetStatus('無法開啟麥克風（請允許權限）');
+        gptSetAnswer(`（麥克風錯誤）${err?.message || err}`);
+      }
+    }
+
+    function gptStopRecording(forceStopTracks){
+      try { clearTimeout(gptRecordTimer); } catch(e) {}
+      gptRecordTimer = null;
+      try{
+        if (gptRT.rec && gptRT.rec.state !== 'inactive'){
+          gptRT.rec.stop();
+        } else {
+          gptRT.rec = null;
+        }
+      }catch(e){
+        gptRT.rec = null;
+      }
+
+      if (forceStopTracks){
+        try{ gptRT.stream?.getTracks()?.forEach(t=>t.stop()); }catch(e){}
+        gptRT.stream = null;
+      }
+    }
+
+    async function gptTranscribeBlob(blob){
+      // iOS 對 btoa/大量 binary string 比較敏感：改用 FileReader 轉 dataURL 再取 base64
+      const b64 = await blobToBase64(blob);
+
+      const r = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          audio_base64: b64,
+          mime_type: blob.type || 'audio/webm'
+        })
+      });
+
+      // 用 text() + JSON.parse：避免 iOS 上 response.json() 的怪錯誤訊息
+      const rawText = await r.text();
+      let data = {};
+      try { data = JSON.parse(rawText); } catch(e) {
+        throw new Error('Transcribe 回傳非 JSON：' + rawText.slice(0, 120));
+      }
+
+      if (!r.ok) throw new Error(data?.error || 'transcribe failed');
+      return data.text || '';
+    }
+
+    function blobToBase64(blob){
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          try{
+            const res = reader.result || '';
+            const idx = String(res).indexOf('base64,');
+            if (idx === -1) return reject(new Error('無法取得 base64'));
+            resolve(String(res).slice(idx + 7));
+          }catch(e){ reject(e); }
+        };
+        reader.onerror = () => reject(reader.error || new Error('FileReader error'));
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    async function gptSend(){
+      if (gptRT.busy) return;
+      const question = (gptRT.transcript || '').trim();
+      if (!question){
+        gptSetStatus('請先語音轉文字或打字輸入');
+        return;
+      }
+      gptRT.busy = true;
+      gptSetStatus('思考中…');
+      gptSetAnswer('（思考中…）');
+
+      const topicId = state?.current?.topicId || '';
+      const lessonId = state?.current?.lessonId || '';
+      const context = [
+        topicId ? `topic=${topicId}` : '',
+        lessonId ? `lesson=${lessonId}` : ''
+      ].filter(Boolean).join(' ');
+
+      try{
+        const r = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, context })
+        });
+        const rawText = await r.text();
+        let data = {};
+        try { data = JSON.parse(rawText); } catch(e) { throw new Error('Ask 回傳非 JSON：' + rawText.slice(0,120)); }
+        if (!r.ok) throw new Error(data?.error || 'ask failed');
+
+        gptSetAnswer(data.answer || '（沒有回答）');
+        gptSetStatus('完成 ✅');
+
+        try{
+          if (typeof logEvent === 'function'){
+            logEvent('gpt_question', { topicId, lessonId, data: { question } });
+            logEvent('gpt_answer', { topicId, lessonId, data: { answer: data.answer || '' } });
+          }
+        }catch(e){}
+      }catch(err){
+        gptSetStatus('失敗');
+        gptSetAnswer(`（錯誤）${err?.message || err}`);
+      }finally{
+        gptRT.busy = false;
+      }
+    }
+
+    function gptOpenTyping(){
+      const ov = document.getElementById('gptTypeOverlay');
+      const inp = document.getElementById('gptTypeInput');
+      if (!ov || !inp) return;
+      ov.style.display = 'block';
+      inp.value = gptRT.transcript || '';
+      updateUiLock();
+      setTimeout(()=>inp.focus(), 60);
+    }
+
+    function gptCloseTyping(){
+      const ov = document.getElementById('gptTypeOverlay');
+      if (ov) ov.style.display = 'none';
+      updateUiLock();
+    }
+
+    async function gptSendTyping(){
+      const inp = document.getElementById('gptTypeInput');
+      if (!inp) return;
+      const text = (inp.value || '').trim();
+      if (!text) return;
+      gptSetTranscript(text);
+      gptCloseTyping();
+      openGptVr();
+      await gptSend();
+    }
+
+
     window.addEventListener('DOMContentLoaded', () => {
       loadState();
 
-      // Name Gate：每次都顯示（避免看不到輸入名字）
       const gate  = document.getElementById('nameGate');
       const input = document.getElementById('studentNameInput');
       const btn   = document.getElementById('startBtn');
@@ -590,21 +982,31 @@
         if (!name) { input && input.focus(); return; }
         localStorage.setItem(STORAGE_KEY_NAME, name);
         gate.style.display = 'none';
-
-        // ✅ 一律從 scene1（Topic 選單）開始
         goTopicMenu();
       }
       btn?.addEventListener('click', start);
       input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
-    });</script>
+
+      // GPT 打字 overlay
+      const typeSend = document.getElementById('gptTypeSendBtn');
+      const typeClose = document.getElementById('gptTypeCloseBtn');
+      const typeInput = document.getElementById('gptTypeInput');
+      gptCloseTyping();
+      typeSend?.addEventListener('click', () => gptSendTyping());
+      typeClose?.addEventListener('click', () => gptCloseTyping());
+      typeInput?.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') gptSendTyping();
+      });
+
+    });
+  </script>
 </head>
 
 <body style="margin:0; background:#000;">
-  <!-- Name Gate -->
   <div id="nameGate" style="display:none;">
     <div id="nameCard">
       <h2>請輸入姓名</h2>
-      <p>用於學習紀錄與介面顯示。完成後即可開始操作（凝視停留 <b>3 秒</b> 即可點選）。</p>
+      <p>用於學習紀錄與介面顯示。完成後即可開始操作（凝視停留 <b>1.5 秒</b> 即可點選）。</p>
       <div id="nameRow">
         <input id="studentNameInput" placeholder="輸入名字..." autocomplete="name" />
         <button id="startBtn">開始體驗</button>
@@ -612,6 +1014,23 @@
       <div id="hint">提示：狀態會存於 localStorage，避免 iOS 偶發重整導致進度丟失。</div>
     </div>
   </div>
+
+  
+  <!-- 打字輸入 Overlay（VR 噪音環境備用） -->
+  <div id="gptTypeOverlay" style="display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.65); padding:18px; font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans TC',sans-serif;">
+    <div style="max-width:720px; margin:0 auto; background:#111; border-radius:14px; padding:14px; color:#fff; box-shadow:0 10px 28px rgba(0,0,0,.35);">
+      <div style="font-weight:700; margin-bottom:10px;">AI 助教｜打字輸入</div>
+      <textarea id="gptTypeInput" rows="5" style="width:100%; box-sizing:border-box; border-radius:10px; border:1px solid rgba(255,255,255,0.15); padding:10px; background:#1d1d1d; color:#fff; resize:vertical;" placeholder="在這裡打字輸入問題..."></textarea>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="gptTypeSendBtn" style="flex:1; padding:10px; border-radius:10px; border:0; background:#2f7cff; color:#fff; cursor:pointer;">送出到 AI</button>
+        <button id="gptTypeCloseBtn" style="width:120px; padding:10px; border-radius:10px; border:0; background:#333; color:#fff; cursor:pointer;">關閉</button>
+      </div>
+      <div id="gptTypeHint" style="margin-top:10px; font-size:12px; opacity:.8;">
+        提示：此輸入框是「噪音環境備用」。在部分手機 VR 全螢幕模式下若被系統隱藏，可先退出 VR 再打字送出。
+      </div>
+    </div>
+  </div>
+
 
   <a-scene renderer="colorManagement: true; physicallyCorrectLights: false" vr-mode-ui="enabled: true">
     <a-assets>
@@ -632,6 +1051,7 @@
       <img id="pano_t3_l2"  src="pano/t3_l2.jpg" crossorigin="anonymous">
       <img id="pano_t3_l3"  src="pano/t3_l3.jpg" crossorigin="anonymous">
 
+      <!-- 骨架保留占位圖；你後續若不用圖片，也不影響 hotspot 本身是黃色球體 -->
       <img id="info_placeholder" src="info/placeholder.png" crossorigin="anonymous">
     </a-assets>
 
@@ -647,107 +1067,301 @@
     <!-- Page: Topic Menu -->
     <a-entity id="pageTopicMenu" visible="true" position="0 1.25 -2.0">
       <a-plane width="2.0" height="0.55" material="shader: flat; color: #111; opacity: 0.9"></a-plane>
-      <a-entity text="value: 請選擇 Topic; align: center; width: 3; color: #fff"
+      <a-entity text="value: 請選擇 Topic
+凝視按鈕 1.5 秒即可進入; align: center; width: 2.4; color: #fff; wrapCount: 16"
                 position="0 0 0.01"></a-entity>
 
       <a-box data-ui="true" class="clickable" ui-action="action: goHub; a: t1"
-             position="-1.0 -0.65 0" scale="0.75 0.28 0.1" color="#2f7cff"></a-box>
-      <a-entity text="value: Topic 1; align: center; width: 2; color: #fff"
-                position="-1.0 -0.65 0.06"></a-entity>
+             position="-1.3 -0.65 0" scale="0.95 0.34 0.12" color="#2f7cff"></a-box>
+      <a-entity data-ui="true"
+                text="value: Topic 1; align: center; width: 2; color: #fff"
+                position="-1.3 -0.65 0.12"></a-entity>
 
       <a-box data-ui="true" class="clickable" ui-action="action: goHub; a: t2"
-             position="0.0 -0.65 0" scale="0.75 0.28 0.1" color="#2f7cff"></a-box>
-      <a-entity text="value: Topic 2; align: center; width: 2; color: #fff"
-                position="0.0 -0.65 0.06"></a-entity>
+             position="0.0 -0.65 0" scale="0.95 0.34 0.12" color="#2f7cff"></a-box>
+      <a-entity data-ui="true"
+                text="value: Topic 2; align: center; width: 2; color: #fff"
+                position="0.0 -0.65 0.12"></a-entity>
 
       <a-box data-ui="true" class="clickable" ui-action="action: goHub; a: t3"
-             position="1.0 -0.65 0" scale="0.75 0.28 0.1" color="#2f7cff"></a-box>
-      <a-entity text="value: Topic 3; align: center; width: 2; color: #fff"
-                position="1.0 -0.65 0.06"></a-entity>
+             position="1.3 -0.65 0" scale="0.95 0.34 0.12" color="#2f7cff"></a-box>
+      <a-entity data-ui="true"
+                text="value: Topic 3; align: center; width: 2; color: #fff"
+                position="1.3 -0.65 0.12"></a-entity>
 
       <a-box data-ui="true" class="clickable" ui-action="action: downloadLog"
-             position="0 -1.15 0" scale="1.2 0.22 0.1" color="#333"></a-box>
-      <a-entity text="value: 下載 log（JSON）; align: center; width: 3; color: #fff"
-                position="0 -1.15 0.06"></a-entity>
+             position="0 -1.35 0.25" scale="2.0 0.36 0.12" color="#333"></a-box>
+      <a-entity data-ui="true"
+                text="value: Download; align: center; width: 3; color: #fff"
+                position="0 -1.35 0.38"></a-entity>
     </a-entity>
 
     <!-- Page: Hub -->
-    <a-entity id="pageHub" visible="false">
-      <a-entity position="0 1.25 -2.0">
-        <a-box data-ui="true" class="clickable" ui-action="action: goTopicMenu"
-               position="-1.2 0.55 0" scale="0.7 0.22 0.1" color="#444"></a-box>
-        <a-entity text="value: 回 Topic; align: center; width: 2.2; color: #fff"
-                  position="-1.2 0.55 0.06"></a-entity>
+    <a-entity id="pageHub" visible="false" position="0 1.18 -2.05">
+      <a-box data-ui="true" class="clickable" ui-action="action: goTopicMenu"
+             position="-0.95 0.72 0" scale="0.70 0.22 0.08" color="#444"></a-box>
+      <a-entity data-ui="true"
+                text="value: 回 Topic; align: center; width: 1.6; color: #fff"
+                position="-0.95 0.72 0.05"></a-entity>
 
-        <a-box data-ui="true" class="clickable" ui-action="action: openGPT"
-               position="1.2 0.55 0" scale="0.7 0.22 0.1" color="#444"></a-box>
-        <a-entity text="value: GPT; align: center; width: 2.2; color: #fff"
-                  position="1.2 0.55 0.06"></a-entity>
+      <a-box data-ui="true" class="clickable" id="btnOpenProgress" ui-action="action: toggleProgress"
+             position="0 0.72 0" scale="0.78 0.22 0.08" color="#444"></a-box>
+      <a-entity data-ui="true"
+                text="value: 學習進度; align: center; width: 1.8; color: #fff"
+                position="0 0.72 0.05"></a-entity>
 
-        <a-plane width="2.4" height="0.45" position="0 0.25 0"
-                 material="shader: flat; color:#111; opacity:0.9"></a-plane>
-        <a-entity id="hubTitle" text="value: ; align: center; width: 3.2; color:#fff"
-                  position="0 0.25 0.01"></a-entity>
+      <a-box data-ui="true" class="clickable" id="gptOpenBtn" ui-action="action: openGPT"
+             position="0.95 0.72 0" scale="0.70 0.22 0.08" color="#444"></a-box>
+      <a-entity data-ui="true"
+                text="value: 回答問題; align: center; width: 1.8; color: #fff"
+                position="0.95 0.72 0.05"></a-entity>
 
-        <a-plane width="2.4" height="0.85" position="0 -0.32 0"
-                 material="shader: flat; color:#111; opacity:0.9"></a-plane>
-        <a-entity id="hubObjectives" text="value: ; align: left; width: 2.2; color:#fff; wrapCount: 28; baseline: top"
-                  position="-1.1 0.05 0.01"></a-entity>
+      <a-plane width="2.35" height="0.34" position="0 0.30 0" material="shader: flat; color:#111; opacity:0.94"></a-plane>
+      <a-entity id="hubTitle" text="value: ; align: center; width: 2.2; wrapCount: 18; color:#fff"
+                position="0 0.30 0.01"></a-entity>
 
-        <a-box data-ui="true" class="clickable" id="btnLesson1"
-               ui-action="action: goLesson; a: t1; b: t1_l1"
-               position="-0.8 -1.15 0" scale="0.9 0.28 0.1" color="#2f7cff"></a-box>
-        <a-entity id="hubLessonLabel1" text="value: ; align: center; width: 2.2; color:#fff"
-                  position="-0.8 -1.15 0.06"></a-entity>
-        <a-plane width="0.9" height="0.06" position="-0.8 -1.35 0" material="shader: flat; color:#333; opacity:0.95"></a-plane>
-        <a-plane id="hubBarFill1" width="0.9" height="0.06" position="-1.25 -1.35 0.01"
-                 scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.95"></a-plane>
+      <a-plane width="2.35" height="0.62" position="0 -0.18 0" material="shader: flat; color:#111; opacity:0.94"></a-plane>
+      <a-entity id="hubObjectives" text="value: ; align: left; width: 2.0; color:#fff; wrapCount: 24; baseline: top"
+                position="-0.95 0.03 0.01"></a-entity>
 
-        <a-box data-ui="true" class="clickable" id="btnLesson2"
-               ui-action="action: goLesson; a: t1; b: t1_l2"
-               position="0 -1.15 0" scale="0.9 0.28 0.1" color="#2f7cff"></a-box>
-        <a-entity id="hubLessonLabel2" text="value: ; align: center; width: 2.2; color:#fff"
-                  position="0 -1.15 0.06"></a-entity>
-        <a-plane width="0.9" height="0.06" position="0 -1.35 0" material="shader: flat; color:#333; opacity:0.95"></a-plane>
-        <a-plane id="hubBarFill2" width="0.9" height="0.06" position="-0.45 -1.35 0.01"
-                 scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.95"></a-plane>
+      <a-entity id="hubLessonGroup-t1" visible="true">
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t1; b: t1_l1"
+               position="0 -0.74 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 1（scene3）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -0.74 0.06"></a-entity>
 
-        <a-box data-ui="true" class="clickable" id="btnLesson3"
-               ui-action="action: goLesson; a: t1; b: t1_l3"
-               position="0.8 -1.15 0" scale="0.9 0.28 0.1" color="#2f7cff"></a-box>
-        <a-entity id="hubLessonLabel3" text="value: ; align: center; width: 2.2; color:#fff"
-                  position="0.8 -1.15 0.06"></a-entity>
-        <a-plane width="0.9" height="0.06" position="0.8 -1.35 0" material="shader: flat; color:#333; opacity:0.95"></a-plane>
-        <a-plane id="hubBarFill3" width="0.9" height="0.06" position="0.35 -1.35 0.01"
-                 scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.95"></a-plane>
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t1; b: t1_l2"
+               position="0 -1.14 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 2（scene4）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -1.14 0.06"></a-entity>
 
-        <a-plane width="2.4" height="0.28" position="0 -1.65 0" material="shader: flat; color:#111; opacity:0.9"></a-plane>
-        <a-entity id="hubQuizStatus" text="value: ; align: center; width: 3; color:#fff"
-                  position="0 -1.65 0.01"></a-entity>
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t1; b: t1_l3"
+               position="0 -1.54 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 3（scene5）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -1.54 0.06"></a-entity>
+      </a-entity>
 
-        <a-box data-ui="true" class="clickable" id="btnStartQuiz"
-               ui-action="action: startQuiz; a: t1"
-               position="0 -1.95 0" scale="1.2 0.24 0.1" color="#444"></a-box>
-        <a-entity id="btnStartQuizLabel" text="value: 開始小測驗（一次性）; align: center; width: 3; color:#fff"
-                  position="0 -1.95 0.06"></a-entity>
+      <a-entity id="hubLessonGroup-t2" visible="false">
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t2; b: t2_l1"
+               position="0 -0.74 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 1（scene3）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -0.74 0.06"></a-entity>
 
-        <a-entity id="hubQuizResultPanel" visible="false" position="0 -2.45 0">
-          <a-plane width="2.4" height="1.1" material="shader: flat; color:#111; opacity:0.9"></a-plane>
-          <a-entity id="hubQuizResultText" text="value: ; align: left; width: 2.2; color:#fff; wrapCount: 34; baseline: top"
-                    position="-1.1 0.5 0.01"></a-entity>
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t2; b: t2_l2"
+               position="0 -1.14 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 2（scene4）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -1.14 0.06"></a-entity>
+
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t2; b: t2_l3"
+               position="0 -1.54 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 3（scene5）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -1.54 0.06"></a-entity>
+      </a-entity>
+
+      <a-entity id="hubLessonGroup-t3" visible="false">
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t3; b: t3_l1"
+               position="0 -0.74 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 1（scene3）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -0.74 0.06"></a-entity>
+
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t3; b: t3_l2"
+               position="0 -1.14 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 2（scene4）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -1.14 0.06"></a-entity>
+
+        <a-box data-ui="true" class="clickable" ui-action="action: goLesson; a: t3; b: t3_l3"
+               position="0 -1.54 0" scale="1.95 0.32 0.10" color="#2f7cff"></a-box>
+        <a-entity data-ui="true" text="value: 單元 3（scene5）; align: center; width: 2.4; wrapCount: 20; color:#fff"
+                  position="0 -1.54 0.06"></a-entity>
+      </a-entity>
+
+      <a-plane width="2.35" height="0.24" position="0 -1.98 0" material="shader: flat; color:#111; opacity:0.92"></a-plane>
+      <a-entity id="hubQuizStatus" text="value: ; align: center; width: 2.2; color:#fff"
+                position="0 -1.98 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnStartQuiz"
+             ui-action="action: startQuiz; a: t1"
+             position="0 -2.06 0" scale="1.30 0.24 0.08" color="#444"></a-box>
+      <a-entity id="btnStartQuizLabel" data-ui="true"
+                text="value: 選擇題; align: center; width: 2.4; color:#fff"
+                position="0 -2.06 0.05"></a-entity>
+
+      <a-entity id="hubQuizResultPanel" visible="false" position="0 -2.88 0">
+        <a-plane width="2.2" height="0.92" material="shader: flat; color:#111; opacity:0.92"></a-plane>
+        <a-entity id="hubQuizResultText" text="value: ; align: left; width: 2.0; color:#fff; wrapCount: 30; baseline: top"
+                  position="-0.98 0.40 0.01"></a-entity>
+      </a-entity>
+
+      <a-entity id="hubProgressPanel" visible="false" position="0 -0.68 0.05">
+        <a-plane width="2.45" height="1.92" material="shader: flat; color:#101820; opacity:0.98"></a-plane>
+        <a-plane width="2.45" height="0.24" position="0 0.84 0.01" material="shader: flat; color:#1f4c7a; opacity:0.98"></a-plane>
+        <a-entity data-ui="true"
+                  text="value: 學習進度; align: center; width: 2.6; color:#fff"
+                  position="0 0.84 0.02"></a-entity>
+        <a-entity id="hubProgressTopicTitle" text="value: ; align: center; width: 2.2; color:#ffe9a8"
+                  position="0 0.62 0.02"></a-entity>
+        <a-entity id="hubProgressTopicSub" text="value: ; align: center; width: 2.1; color:#d7e8ff"
+                  position="0 0.45 0.02"></a-entity>
+
+        <a-entity position="0 0.16 0.02">
+          <a-entity id="hubProgressRowLabel1" text="value: 單元 1; align: left; width: 2.0; color:#fff" position="-0.98 0.12 0.01"></a-entity>
+          <a-entity id="hubProgressStatus1" text="value: ; align: right; width: 1.8; color:#d7e8ff" position="0.85 0.12 0.01"></a-entity>
+          <a-plane width="1.88" height="0.11" position="0 -0.02 0" material="shader: flat; color:#2a3542; opacity:0.98"></a-plane>
+          <a-plane id="hubBarFill1" width="1.88" height="0.11" position="-0.94 -0.02 0.01" scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.98"></a-plane>
+          <a-entity id="hubProgressText1" text="value: 0%; align: center; width: 1.4; color:#fff" position="0 -0.02 0.02"></a-entity>
         </a-entity>
+
+        <a-entity position="0 -0.24 0.02">
+          <a-entity id="hubProgressRowLabel2" text="value: 單元 2; align: left; width: 2.0; color:#fff" position="-0.98 0.12 0.01"></a-entity>
+          <a-entity id="hubProgressStatus2" text="value: ; align: right; width: 1.8; color:#d7e8ff" position="0.85 0.12 0.01"></a-entity>
+          <a-plane width="1.88" height="0.11" position="0 -0.02 0" material="shader: flat; color:#2a3542; opacity:0.98"></a-plane>
+          <a-plane id="hubBarFill2" width="1.88" height="0.11" position="-0.94 -0.02 0.01" scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.98"></a-plane>
+          <a-entity id="hubProgressText2" text="value: 0%; align: center; width: 1.4; color:#fff" position="0 -0.02 0.02"></a-entity>
+        </a-entity>
+
+        <a-entity position="0 -0.64 0.02">
+          <a-entity id="hubProgressRowLabel3" text="value: 單元 3; align: left; width: 2.0; color:#fff" position="-0.98 0.12 0.01"></a-entity>
+          <a-entity id="hubProgressStatus3" text="value: ; align: right; width: 1.8; color:#d7e8ff" position="0.85 0.12 0.01"></a-entity>
+          <a-plane width="1.88" height="0.11" position="0 -0.02 0" material="shader: flat; color:#2a3542; opacity:0.98"></a-plane>
+          <a-plane id="hubBarFill3" width="1.88" height="0.11" position="-0.94 -0.02 0.01" scale="0 1 1" material="shader: flat; color:#7bdc6c; opacity:0.98"></a-plane>
+          <a-entity id="hubProgressText3" text="value: 0%; align: center; width: 1.4; color:#fff" position="0 -0.02 0.02"></a-entity>
+        </a-entity>
+
+        <a-entity id="hubProgressSummary" text="value: ; align: center; width: 2.0; color:#ffe9a8" position="0 -0.96 0.02"></a-entity>
+        <a-box data-ui="true" class="clickable" id="btnCloseProgress" ui-action="action: toggleProgress" position="0 -1.22 0.02" scale="0.95 0.22 0.08" color="#3a4653"></a-box>
+        <a-entity data-ui="true"
+                  text="value: 關閉進度; align: center; width: 1.8; color:#fff" position="0 -1.22 0.07"></a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- Page: Lesson -->
-    <a-entity id="pageLesson" visible="false" position="0 1.25 -2.0">
-      <a-box data-ui="true" class="clickable" id="btnBackToHub"
+    <!-- Pages: Lessons（每個 lesson 都是獨立場景頁） -->
+    <a-entity id="pageLesson-t1_l1" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 1｜植物分類 A
+單元 1（scene3）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t1_l1"
              ui-action="action: goHub; a: t1"
-             position="0 0.55 0" scale="0.9 0.24 0.1" color="#444"></a-box>
-      <a-entity text="value: 回單元 Hub; align: center; width: 3; color:#fff"
-                position="0 0.55 0.06"></a-entity>
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t1_l1" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
     </a-entity>
 
+    <a-entity id="pageLesson-t1_l2" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 1｜植物分類 A
+單元 2（scene4）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t1_l2"
+             ui-action="action: goHub; a: t1"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t1_l2" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t1_l3" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 1｜植物分類 A
+單元 3（scene5）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t1_l3"
+             ui-action="action: goHub; a: t1"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t1_l3" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t2_l1" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 2｜植物分類 B
+單元 1（scene3）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t2_l1"
+             ui-action="action: goHub; a: t2"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t2_l1" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t2_l2" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 2｜植物分類 B
+單元 2（scene4）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t2_l2"
+             ui-action="action: goHub; a: t2"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t2_l2" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t2_l3" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 2｜植物分類 B
+單元 3（scene5）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t2_l3"
+             ui-action="action: goHub; a: t2"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t2_l3" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t3_l1" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 3｜植物分類 C
+單元 1（scene3）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t3_l1"
+             ui-action="action: goHub; a: t3"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t3_l1" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t3_l2" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 3｜植物分類 C
+單元 2（scene4）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t3_l2"
+             ui-action="action: goHub; a: t3"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t3_l2" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <a-entity id="pageLesson-t3_l3" visible="false" position="0 1.12 -2.0">
+      <a-plane width="2.45" height="0.46" material="shader: flat; color:#111; opacity:0.9"></a-plane>
+      <a-entity text="value: Topic 3｜植物分類 C
+單元 3（scene5）; align: center; width: 3.2; color:#fff; wrapCount: 26"
+                position="0 0 0.01"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="btnBackToHub-t3_l3"
+             ui-action="action: goHub; a: t3"
+             position="0 -0.48 0" scale="1.0 0.24 0.1" color="#444"></a-box>
+      <a-entity id="btnBackToHubLabel-t3_l3" data-ui="true"
+                text="value: 回單元 Hub; align: center; width: 3; color:#fff"
+                position="0 -0.48 0.06"></a-entity>
+    </a-entity>
+
+    <!-- Page: Quiz -->
     <!-- Page: Quiz -->
     <a-entity id="pageQuiz" visible="false" position="0 1.15 -2.0">
       <a-plane width="2.6" height="0.4" material="shader: flat; color:#111; opacity:0.9"></a-plane>
@@ -773,88 +1387,218 @@
       <a-entity id="quizOptText3" text="value: ; align: center; width: 3.2; color:#fff"
                 position="0 -1.8 0.06"></a-entity>
 
+      <a-box data-ui="true" class="clickable" id="quizPrevBtn" ui-action="action: prevQuiz"
+             position="-0.8 -2.15 0" scale="0.9 0.24 0.1" color="#444"></a-box>
+      <a-entity id="quizPrevText" text="value: 上一題; align: center; width: 2.2; color:#fff"
+                position="-0.8 -2.15 0.06"></a-entity>
+
       <a-box data-ui="true" class="clickable" id="quizNextBtn" ui-action="action: nextQuiz"
              position="0.8 -2.15 0" scale="1.2 0.24 0.1" color="#2f7cff"></a-box>
       <a-entity id="quizNextText" text="value: 下一題; align: center; width: 2.6; color:#fff"
                 position="0.8 -2.15 0.06"></a-entity>
     </a-entity>
 
-    <!-- Info Panel -->
+    <!-- 大型閱讀面板 -->
     <a-entity id="infoPanel" visible="false">
-      <a-plane width="1.2" height="0.8" material="shader: flat; color: #111; opacity: 0.92"></a-plane>
-      <a-plane id="infoImage" width="1.08" height="0.62" position="0 0 0.01"
+      <a-plane width="3.8" height="2.6" material="shader: flat; color: #111; opacity: 0.96"></a-plane>
+      <a-plane id="infoImage" width="3.4" height="1.9" position="0 -0.08 0.01"
                material="shader: flat; transparent: true; src: #info_placeholder"></a-plane>
 
       <a-plane id="infoCloseBtn" class="clickable" data-ui="true" ui-action="action: closeInfo"
-               width="0.24" height="0.14" position="0.49 0.33 0.02"
+               width="0.60" height="0.26" position="1.35 1.05 0.02"
                material="shader: flat; color: #333; opacity: 0.98"></a-plane>
-      <a-entity text="value: 關閉; align: center; width: 2; color: #fff"
-                position="0.49 0.33 0.03"></a-entity>
+      <a-entity text="value: 關閉; align: center; width: 2.4; color: #fff"
+                position="1.35 1.05 0.03"></a-entity>
     </a-entity>
 
-    <!-- Hotspots groups（Topic1 完整示範 3 個 lesson；Topic2/3 你之後照抄即可） -->
+    <!-- Hotspots：全部黃色球體，位置分散（含後方），距離拉大 -->
+    <!-- Topic1 -->
     <a-entity id="hotspots-t1_l1" visible="false">
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.4 2.0 -3.0" material="shader: flat; color:#FFD54F"
-                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l1_h1"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.4 1.6 -2.8" material="shader: flat; color:#FFD54F"
-                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l1_h2"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.9 1.3 -2.9"  material="shader: flat; color:#FFD54F"
-                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l1_h3"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.6 1.1 -3.1"  material="shader: flat; color:#FFD54F"
-                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l1_h4"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.1 0.8 -2.6"   material="shader: flat; color:#FFD54F"
-                hotspot-panel="img: #info_placeholder; side: up; distance: 0.70; hid: t1_l1_h5"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.1 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t1_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.0 1.0 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t1_l1_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.5 2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t1_l1_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.4 2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t1_l1_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t1_l1_h5"></a-sphere>
     </a-entity>
 
     <a-entity id="hotspots-t1_l2" visible="false">
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.5 2.1 -3.0" material="shader: flat; color:#4FC3F7"
-                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l2_h1"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.2 1.7 -2.7" material="shader: flat; color:#4FC3F7"
-                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l2_h2"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.2 1.45 -3.0" material="shader: flat; color:#4FC3F7"
-                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l2_h3"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.4 1.05 -2.5" material="shader: flat; color:#4FC3F7"
-                hotspot-panel="img: #info_placeholder; side: up; distance: 0.70; hid: t1_l2_h4"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.0 0.75 -2.8" material="shader: flat; color:#4FC3F7"
-                hotspot-panel="img: #info_placeholder; side: down; distance: 0.70; hid: t1_l2_h5"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.5 1.6 -2.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t1_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 2.0 -2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t1_l2_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.0 0.9 2.7" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: up; distance: 1.4; hid: t1_l2_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.5 1.5 2.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t1_l2_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 1.6 3.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t1_l2_h5"></a-sphere>
     </a-entity>
 
     <a-entity id="hotspots-t1_l3" visible="false">
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-1.6 2.0 -3.0" material="shader: flat; color:#A5D6A7"
-                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l3_h1"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="-0.6 1.6 -2.8" material="shader: flat; color:#A5D6A7"
-                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l3_h2"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.8 1.3 -2.9"  material="shader: flat; color:#A5D6A7"
-                hotspot-panel="img: #info_placeholder; side: right; distance: 0.65; hid: t1_l3_h3"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="1.55 1.0 -3.1" material="shader: flat; color:#A5D6A7"
-                hotspot-panel="img: #info_placeholder; side: left; distance: 0.65; hid: t1_l3_h4"></a-sphere>
-      <a-sphere data-hotspot="true" class="clickable" radius="0.10" position="0.1 0.7 -2.6"  material="shader: flat; color:#A5D6A7"
-                hotspot-panel="img: #info_placeholder; side: up; distance: 0.70; hid: t1_l3_h5"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.1 1.0 -2.5" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t1_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.2 1.5 -2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t1_l3_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-3.0 2.1 0.6" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t1_l3_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="3.0 1.0 0.8" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t1_l3_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.4 2.9" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t1_l3_h5"></a-sphere>
     </a-entity>
 
-    <a-entity id="hotspots-t2_l1" visible="false"></a-entity>
-    <a-entity id="hotspots-t2_l2" visible="false"></a-entity>
-    <a-entity id="hotspots-t2_l3" visible="false"></a-entity>
+    <!-- Topic2 -->
+    <a-entity id="hotspots-t2_l1" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.0 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t2_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 1.1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t2_l1_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.4 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t2_l1_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.5 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t2_l1_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t2_l1_h5"></a-sphere>
+    </a-entity>
 
-    <a-entity id="hotspots-t3_l1" visible="false"></a-entity>
-    <a-entity id="hotspots-t3_l2" visible="false"></a-entity>
-    <a-entity id="hotspots-t3_l3" visible="false"></a-entity>
+    <a-entity id="hotspots-t2_l2" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.0 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t2_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 1.1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t2_l2_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.4 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t2_l2_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.5 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t2_l2_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t2_l2_h5"></a-sphere>
+    </a-entity>
+
+    <a-entity id="hotspots-t2_l3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.0 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t2_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 1.1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t2_l3_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.4 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t2_l3_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.5 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t2_l3_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t2_l3_h5"></a-sphere>
+    </a-entity>
+
+    <!-- Topic3 -->
+    <a-entity id="hotspots-t3_l1" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.0 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t3_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 1.1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t3_l1_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.4 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t3_l1_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.5 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t3_l1_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t3_l1_h5"></a-sphere>
+    </a-entity>
+
+    <a-entity id="hotspots-t3_l2" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.0 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t3_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 1.1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t3_l2_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.4 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t3_l2_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.5 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t3_l2_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t3_l2_h5"></a-sphere>
+    </a-entity>
+
+    <a-entity id="hotspots-t3_l3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.2 2.0 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t3_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.1 1.1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t3_l3_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="-2.4 1.4 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: right; distance: 1.4; hid: t3_l3_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="2.3 1.5 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: left; distance: 1.4; hid: t3_l3_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.16" position="0.0 2.3 3.0" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info_placeholder; side: down; distance: 1.4; hid: t3_l3_h5"></a-sphere>
+    </a-entity>
+
+    
+    <!-- =========================
+         GPT VR 面板（語音轉文字 + 打字輸入）
+         - 語音：錄音 → /api/transcribe → 文字
+         - 送出：文字 → /api/ask → 回答
+         ========================= -->
+    <a-entity id="gptVrPanel" visible="false" position="0 1.35 -1.7">
+      <a-plane width="3.2" height="2.0" material="shader: flat; color:#0f0f0f; opacity:0.96"></a-plane>
+
+      <a-entity id="gptVrTitle"
+        text="value: AI 助教; align:center; width: 3.2; color:#fff"
+        position="0 0.90 0.01"></a-entity>
+
+      <a-entity id="gptVrStatus"
+        text="value: 狀態：待命; align:left; width: 3.0; color:#ddd; wrapCount: 42"
+        position="-1.5 0.68 0.01"></a-entity>
+
+      <a-entity id="gptVrTranscript"
+        text="value: 輸入內容：\n（尚未輸入）; align:left; width: 3.0; color:#fff; wrapCount: 42"
+        position="-1.5 0.25 0.01"></a-entity>
+
+      <a-entity id="gptVrAnswer"
+        text="value: AI 回答：\n（尚未送出）; align:left; width: 3.0; color:#9fe6ff; wrapCount: 42"
+        position="-1.5 -0.55 0.01"></a-entity>
+
+      <!-- 按鈕列：錄音/停止/送出/打字/關閉 -->
+      <a-box data-ui="true" class="clickable" ui-action="action: gptRecStart"
+        position="-1.15 -0.90 0.02" scale="0.75 0.24 0.12" color="#444"></a-box>
+      <a-entity text="value: 🎙 開始; align:center; width: 2.2; color:#fff"
+        position="-1.15 -0.90 0.09"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: gptRecStop"
+        position="-0.35 -0.90 0.02" scale="0.75 0.24 0.12" color="#444"></a-box>
+      <a-entity text="value: ⏹ 停止; align:center; width: 2.2; color:#fff"
+        position="-0.35 -0.90 0.09"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: gptSend"
+        position="0.45 -0.90 0.02" scale="0.75 0.24 0.12" color="#2f7cff"></a-box>
+      <a-entity text="value: 送出; align:center; width: 2.2; color:#fff"
+        position="0.45 -0.90 0.09"></a-entity>
+
+      <a-box data-ui="true" class="clickable" ui-action="action: gptType"
+        position="1.25 -0.90 0.02" scale="0.75 0.24 0.12" color="#444"></a-box>
+      <a-entity text="value: ⌨ 打字; align:center; width: 2.2; color:#fff"
+        position="1.25 -0.90 0.09"></a-entity>
+
+      <a-box data-ui="true" class="clickable" id="gptCloseBtn" ui-action="action: gptClose"
+        position="0 -1.22 0.02" scale="1.2 0.22 0.12" color="#333"></a-box>
+      <a-entity text="value: 關閉面板; align:center; width: 3.0; color:#fff"
+        position="0 -1.22 0.09"></a-entity>
+    </a-entity>
+
 
     <!-- Gaze cursor 3s -->
     <a-entity id="rig">
       <a-camera position="0 1.6 0" wasd-controls-enabled="false">
-        <a-cursor fuse="true" fuse-timeout="3000"
+        <a-cursor fuse="true" fuse-timeout="1500"
           raycaster="objects: .clickable"
           material="color: white; shader: flat"
           geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.017"
-          animation__fusing="property: geometry.radiusInner; from: 0.01; to: 0.001; dur: 3000; startEvents: fusing"
+          animation__fusing="property: geometry.radiusInner; from: 0.01; to: 0.001; dur: 1500; startEvents: fusing"
           animation__reset="property: geometry.radiusInner; to: 0.01; dur: 120; startEvents: mouseleave">
         </a-cursor>
       </a-camera>
     </a-entity>
 
     <script>
-      // 初始 HUD（若尚未輸入名字，會在 Gate 後才 goTopicMenu）
       setHud('Topic 選單');
     </script>
   </a-scene>
