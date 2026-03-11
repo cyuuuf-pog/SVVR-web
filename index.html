@@ -697,39 +697,17 @@ AFRAME.registerComponent('hotspot-panel', {
           topic_id: state?.current?.topicId || '',
           scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
         });
-
         const payload = JSON.stringify(state.logs, null, 2);
-        const filename = `svvr_log_${name}.json`;
-        const encoded = 'data:text/json;charset=utf-8,' + encodeURIComponent(payload);
-
+        const blob = new Blob([payload], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.style.display = 'none';
-        a.setAttribute('href', encoded);
-        a.setAttribute('download', filename);
+        a.href = url;
+        a.download = `svvr_log_${name}.json`;
         document.body.appendChild(a);
-
-        try {
-          a.click();
-        } catch (_) {
-          a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        }
-
-        setTimeout(() => {
-          try{ a.remove(); }catch(e){}
-        }, 1500);
-
-        const fallback = document.createElement('a');
-        fallback.style.display = 'none';
-        fallback.setAttribute('href', encoded);
-        fallback.setAttribute('target', '_blank');
-        document.body.appendChild(fallback);
-        setTimeout(() => {
-          try { fallback.click(); } catch(_) {}
-          setTimeout(() => { try{ fallback.remove(); }catch(e){} }, 1500);
-        }, 250);
-      }catch(e){
-        console.error('downloadLog failed:', e);
-      }
+        a.click();
+        setTimeout(() => { try{ a.remove(); }catch(e){} }, 0);
+        URL.revokeObjectURL(url);
+      }catch(e){}
     }
 
     AFRAME.registerComponent('ui-action', {
@@ -1136,10 +1114,10 @@ AFRAME.registerComponent('hotspot-panel', {
                 position="1.12 -0.62 0.12"></a-entity>
 
       <a-box data-ui="true" class="clickable" ui-action="action: downloadLog"
-             position="0 -1.2 0.48" scale="1.58 0.24 0.1" color="#333"></a-box>
+             position="0 1.2 0.25" scale="1.58 0.24 0.1" color="#333"></a-box>
       <a-entity data-ui="true"
                 text="value: Download; align: center; width: 2.0; color: #fff"
-                position="0 -1.14 0.60"></a-entity>
+                position="0 1.16 0.36"></a-entity>
     </a-entity>
 
     <!-- Page: Hub -->
@@ -1270,9 +1248,9 @@ AFRAME.registerComponent('hotspot-panel', {
         </a-entity>
 
         <a-entity id="hubProgressSummary" text="value: ; align: center; width: 2.0; color:#111" position="0 -0.88 0.02"></a-entity>
-        <a-box data-ui="true" class="clickable" id="btnCloseProgress" ui-action="action: toggleProgress" position="0 -1.22 0.02" scale="0.95 0.22 0.08" color="#111111"></a-box>
+        <a-box data-ui="true" class="clickable" id="btnCloseProgress" ui-action="action: toggleProgress" position="0 -1.22 0.02" scale="0.95 0.22 0.08" color="#ffffff"></a-box>
         <a-entity data-ui="true"
-                  text="value: X; align: center; width: 1.8; color:#ffffff" position="0 -1.22 0.07"></a-entity>
+                  text="value: X; align: center; width: 1.8; color:#111111" position="0 -1.22 0.07"></a-entity>
       </a-entity>
     </a-entity>
 
