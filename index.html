@@ -281,8 +281,32 @@
       }
       if (t === 'gpt') qs('#gptCloseBtn')?.classList.add('clickable');
     }
+    function setLessonFocusMode(enabled){
+      const { lessonId } = state.current || {};
+      if (!lessonId) return;
+      const lessonPageSel = `#pageLesson-${lessonId}`;
+      const lessonPage = qs(lessonPageSel);
+      if (lessonPage) {
+        lessonPage.setAttribute('visible', !enabled);
+      }
+
+      let hotspotGroupSel = null;
+      for (const topic of Object.values(TOPICS)) {
+        const lesson = topic.lessons.find(x => x.id === lessonId);
+        if (lesson) {
+          hotspotGroupSel = lesson.hotspotsGroup;
+          break;
+        }
+      }
+      if (hotspotGroupSel) {
+        const hotspotGroup = qs(hotspotGroupSel);
+        if (hotspotGroup) hotspotGroup.setAttribute('visible', !enabled);
+      }
+    }
+
     function closeInfoPanel(){
       setVisible('#infoPanel', false);
+      setLessonFocusMode(false);
       updateUiLock();
     }
     function closeProgressPanel(){
@@ -558,6 +582,7 @@ AFRAME.registerComponent('hotspot-panel', {
           panel.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
           panel.setAttribute('visible', true);
           faceCameraYaw(panel);
+          setLessonFocusMode(true);
 
           updateUiLock();
         };
